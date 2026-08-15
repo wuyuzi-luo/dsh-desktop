@@ -1,0 +1,138 @@
+// Skill 管理模块（CC Switch 模式）：扫描技能根 + SKILL.md 解析 + 安装/停用
+// dsh-skill-filesystem 的扫描根：$DSH_HOME/skills、~/.agents/skills、项目 .dsh/skills
+// 停用 = 移入 $DSH_HOME/skills-disabled（移出扫描根，chokidar 热生效）
+
+import { readdir, readFile, stat, mkdir, copyFile, rename } from 'node:fs/promises'; // 文件操作
+import { existsSync } from 'node:fs'; // 存在性检查
+import { join, basename } from 'node:path'; // 路径拼接
+import { homedir } from 'node:os'; // 用户主目录
+import { getSkillsDir, getDisabledSkillsDir, getConfig } from './config.js'; // 目录配置
+
+// 列出所有技能扫描根（dsh-skill-filesystem 的约定目录）
+export function getSkillRoots() {
+  const roots = []; // 结果
+  const skillsDir = getSkillsDir(); // $DSH_HOME/skills（用户级，安装落点）
+  const agentsDir = join(homedir(), '.agents', 'skills'); // ~/.agents/skills（共享 agent 目录）
+  roots.push({ path: skillsDir, label: 'dsh 用户技能', priority: 400 }); // 主扫描根
+  roots.push({ path: agentsDir, label: '共享 agent 技能', priority: 500 }); // 副扫描根
+  return roots; // 返回
+}
+
+// 解析 SKILL.md 的 frontmatter 与描述（容错：任何异常都降级返回文件名）
+async function readSkillMeta(dir) {
+  const skillMd = join(dir, 'SKILL.md'); // 标准技能文件
+  if (!existsSync(skillMd)) { // 无 SKILL.md
+    const mdFiles = (await readdir(dir)).filter((f) => f.endsWith('.md')); // 平铺 Markdown 形式
+    if (!mdFiles.length) return null; // 什么也没有
+    const first = mdFiles[0]; // 取第一个 md
+    const text = await readFile(join(dir, first), 'utf8'); // 读正文
+    return { name: basename(dir), description: firstLine(text), file: first }; // 降级元信息
+  }
+  const text = await readFile(skillMd, 'utf8'); // 读 SKILL.md
+  const fm = parseFrontmatter(text); // 解析 frontmatter
+  return { name: fm.name || basename(dir), description: fm.description || firstLine(text), file: 'SKILL.md' }; // 组装元信息
+}
+
+// 极简 frontmatter 解析（--- 包裹的 YAML 键值，只看 name/description）
+function parseFrontmatter(text) {
+  const m = text.match(/^---\s*\n([\s\S]*?)\n---/); // 匹配头部 frontmatter
+  const out = {}; // 结果
+  if (m) { // 有 frontmatter
+    for (const line of m[1].split('\n')) { // 逐行
+      const kv = line.match(/^([A-Za-z_-]+):\s*(.*)$/); // 键值行
+      if (kv) out[kv[1]] = kv[2].trim().replace(/^["']|["']$/g, ''); // 去引号
+    }
+  }
+  return out; // 返回
+}
+
+// 取正文第一行作为降级描述
+function firstLine(text) {
+  const line = text.split('\n').find((l) => l.trim() && !l.trim().startsWith('#')); // 找首条非空非标题行
+  return line ? line.trim().slice(0, 120) : ''; // 截断返回
+}
+
+// 扫描一个目录下的技能清单
+async function scanDir(rootPath, label) {
+  if (!existsSync(rootPath)) return []; // 目录不存在 → 空
+  const entries = await readdir(rootPath, { withFileTypes: true }); // 列出条目
+  const out = []; // 结果
+  for (const e of entries) { // 逐条目
+    if (!e.isDirectory()) continue; // 只认目录（每个技能一个文件夹）
+    if (e.name.startsWith('.')) continue; // 跳过隐藏目录
+    const dir = join(rootPath, e.name); // 完整路径
+    try {
+      const meta = await readSkillMeta(dir); // 解析元信息
+      if (!meta) continue; // 空技能跳过
+      out.push({ // 组装条目
+        id: `${rootPath}::${e.name}`, // 唯一 id
+        dir, // 磁盘路径
+        source: label, // 来源标签
+        enabled: true, // 在扫描根内 = 启用
+        ...meta // 名称与描述
+      });
+    } catch { /* 单个技能异常跳过 */ }
+  }
+  return out; // 返回清单
+}
+
+// 列出全部技能（启用 + 停用两类）
+export async function listSkills() {
+  const roots = getSkillRoots(); // 扫描根
+  const enabled = []; // 启用列表
+  for (const r of roots) { // 逐根扫描
+    enabled.push(...(await scanDir(r.path, r.label))); // 收集
+  }
+  // 停用目录（skills-disabled 不在 dsh 扫描根内）
+  const disabledRoot = getDisabledSkillsDir(); // 停用暂存目录
+  const disabled = await scanDir(disabledRoot, '已停用'); // 扫描暂存目录
+  for (const d of disabled) d.enabled = false; // 标记停用
+  return [...enabled, ...disabled]; // 合并返回
+}
+
+// 读取技能正文（面板展开查看 SKILL.md）
+export async function readSkillContent(id) {
+  const all = await listSkills(); // 找目标
+  const skill = all.find((s) => s.id === id); // 按 id 匹配
+  if (!skill) return null; // 不存在
+  const file = join(skill.dir, skill.file || 'SKILL.md'); // 正文文件
+  if (!existsSync(file)) return null; // 文件缺失
+  return readFile(file, 'utf8'); // 返回全文
+}
+
+// 安装技能：把源文件夹复制到 $DSH_HOME/skills
+export async function installSkill(sourceDir) {
+  if (!existsSync(sourceDir)) throw new Error('源目录不存在'); // 校验
+  const name = basename(sourceDir); // 目标名取末级目录名
+  const target = join(getSkillsDir(), name); // 安装落点
+  if (existsSync(target)) throw new Error(`技能 ${name} 已存在`); // 防覆盖
+  await mkdir(getSkillsDir(), { recursive: true }); // 确保根目录
+  await copyDir(sourceDir, target); // 递归复制
+}
+
+// 递归复制目录（Node 无内置，自写小工具）
+async function copyDir(src, dest) {
+  await mkdir(dest, { recursive: true }); // 建目标目录
+  const entries = await readdir(src, { withFileTypes: true }); // 列出源
+  for (const e of entries) { // 逐条目
+    const s = join(src, e.name); // 源路径
+    const d = join(dest, e.name); // 目标路径
+    if (e.isDirectory()) await copyDir(s, d); // 目录递归
+    else if (e.isFile()) await copyFile(s, d); // 文件复制
+  }
+}
+
+// 切换启用/停用（移动文件夹进/出扫描根，chokidar 热生效）
+export async function toggleSkill(id, enabled) {
+  const all = await listSkills(); // 找目标
+  const skill = all.find((s) => s.id === id); // 按 id 匹配
+  if (!skill) throw new Error('技能不存在'); // 不存在报错
+  if (skill.enabled === Boolean(enabled)) return; // 状态未变
+  if (enabled) { // 启用：从暂存目录移回 $DSH_HOME/skills
+    await mkdir(getSkillsDir(), { recursive: true }); // 确保根
+    await rename(skill.dir, join(getSkillsDir(), basename(skill.dir))); // 移动（同盘 rename 原子）
+  } else { // 停用：移入 skills-disabled
+    await mkdir(getDisabledSkillsDir(), { recursive: true }); // 确保暂存目录
+    await rename(skill.dir, join(getDisabledSkillsDir(), basename(skill.dir))); // 移动
+  }
+}

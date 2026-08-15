@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>dsh 控制面板</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <!-- 无边框窗口：自绘标题栏（可拖拽） -->
+  <header class="titlebar">
+    <span class="dot"></span>
+    <span class="title">dsh 控制面板</span>
+    <span class="ver" id="ver">v-</span>
+  </header>
+
+  <!-- 状态行：服务状态点 + 地址 + 更新状态 -->
+  <div class="statusbar">
+    <span class="status-dot" id="svcDot"></span>
+    <span class="status-text" id="svcText">检查中…</span>
+    <span class="addr" id="svcUrl"></span>
+  </div>
+
+  <!-- Tab 页签（dsh web 风格） -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="ws">工作区</button>
+    <button class="tab" data-tab="skills">Skills</button>
+    <button class="tab" data-tab="mcp">MCP</button>
+  </nav>
+
+  <!-- 工作区 Tab -->
+  <section class="pane active" id="pane-ws">
+    <div class="list" id="wsList"></div>
+  </section>
+
+  <!-- Skills Tab -->
+  <section class="pane" id="pane-skills">
+    <div class="list" id="skillList"></div>
+    <button class="addbtn" id="skillAdd">＋ 添加 Skill（文件夹）</button>
+  </section>
+
+  <!-- MCP Tab -->
+  <section class="pane" id="pane-mcp">
+    <div class="list" id="mcpList"></div>
+    <button class="addbtn" id="mcpAdd">＋ 添加 MCP</button>
+  </section>
+
+  <!-- Codex 式底部按键行 -->
+  <footer class="actions">
+    <button class="abtn" id="btnOpen">◧ 打开工作台</button>
+    <button class="abtn" id="btnRestart">↻ 重启服务</button>
+    <button class="abtn" id="btnUpdate">↻ 检查更新</button>
+  </footer>
+
+  <!-- MCP 添加弹层（手动添加 / 导入已有 两种模式） -->
+  <div class="modal" id="mcpModal" hidden>
+    <div class="modal-body">
+      <h3>添加 MCP</h3>
+      <div class="mode-switch">
+        <button class="abtn primary" id="modeManual">手动添加</button>
+        <button class="abtn" id="modeImport">导入已有</button>
+      </div>
+      <!-- 手动添加表单 -->
+      <div id="manualFields">
+        <label>名称 (serverName)
+          <input id="mcpName" placeholder="如 github" />
+        </label>
+        <label>传输方式
+          <select id="mcpTransport">
+            <option value="stdio">stdio（命令行）</option>
+            <option value="streamable-http">streamable-http（HTTP）</option>
+          </select>
+        </label>
+        <div id="stdioFields">
+          <label>命令
+            <input id="mcpCommand" placeholder="如 npx" />
+          </label>
+          <label>参数（逗号分隔）
+            <input id="mcpArgs" placeholder="如 -y, @modelcontextprotocol/server-github" />
+          </label>
+        </div>
+        <div id="httpFields" hidden>
+          <label>URL
+            <input id="mcpUrl" placeholder="http://localhost:3000/mcp" />
+          </label>
+        </div>
+      </div>
+      <!-- 导入已有视图：列出 cordis.patch.yml 中发现的外部 MCP -->
+      <div id="importFields" hidden>
+        <div class="list" id="importList" style="max-height:200px;overflow-y:auto"></div>
+        <div class="empty" id="importEmpty" hidden>没有发现可导入的 MCP 实例</div>
+      </div>
+      <div class="modal-actions">
+        <button class="abtn" id="mcpCancel">取消</button>
+        <button class="abtn primary" id="mcpSave" hidden>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+</html>

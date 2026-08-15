@@ -1,0 +1,32 @@
+# electron-builder 打包配置：NSIS 安装包（中文界面、可改路径、桌面+开始菜单）
+
+appId: com.dshdesktop.app # Windows 应用标识（与 AUMID 一致）
+productName: DeepSeek Harness 桌面 # 产品显示名
+directories:
+  output: dist # 打包产物目录
+files:
+  - src/**/* # 源码（main/preload/renderer）
+  - package.json # 包清单
+asar: false # ESM 主进程与 asar 虚拟文件系统存在兼容问题（Node ESM loader 无法从 asar 读模块），关闭后用真实文件
+win:
+  target:
+    - target: nsis # NSIS 安装器
+      arch: [x64] # 64 位
+  icon: build/icon.ico # 应用图标
+  executableName: dsh-desktop # 可执行文件名
+nsis:
+  oneClick: false # 向导式安装（用户能看到并修改安装路径）
+  perMachine: false # 当前用户安装（免 UAC）
+  allowToChangeInstallationDirectory: true # 允许改安装目录
+  installerLanguages: ["zh_CN"] # 中文安装界面
+  shortcutName: DeepSeek Harness 桌面 # 开始菜单名
+  createDesktopShortcut: true # 桌面快捷方式
+  createStartMenuShortcut: true # 开始菜单快捷方式
+  uninstallDisplayName: DeepSeek Harness 桌面 # 卸载程序显示名
+  deleteAppDataOnUninstall: false # 卸载保留配置（升级不丢数据）
+  include: build/installer.nsh # 自定义 NSIS 片段（默认路径 + 卸载杀服务）
+  artifactName: dsh-desktop-setup-${version}.exe # 安装包命名
+publish:
+  provider: github # 更新通道：GitHub Releases（electron-updater 消费 latest.yml）
+  owner: wuyuzi-luo # 发布账号（gh 已登录）
+  repo: dsh-desktop # 发布仓库
