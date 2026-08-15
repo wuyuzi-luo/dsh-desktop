@@ -185,10 +185,14 @@ els.btnUpdate.addEventListener('click', async () => { // 检查更新
   setTimeout(refreshAll, 2000); // 稍后刷新
 });
 
-// 技能添加：调主进程弹目录选择
+// 技能添加：调主进程弹选择（文件夹或 zip）
 els.skillAdd.addEventListener('click', async () => { // 安装技能
-  await window.dshDesktop.installSkill(); // 主进程弹框并复制
-  refreshAll(); // 刷新
+  const result = await window.dshDesktop.installSkill(); // 主进程弹框并安装
+  if (result && result.error) { // 安装失败（如 zip 内无 SKILL.md）
+    alert('安装失败：' + result.error); // 展示错误
+    return;
+  }
+  refreshAll(); // 刷新列表
 });
 
 // MCP 添加弹层（手动添加 / 导入已有 两种模式）

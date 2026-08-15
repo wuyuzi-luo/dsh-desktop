@@ -241,11 +241,14 @@ export async function listImportableMcps() {
   return externals.filter((e) => !managedNames.has(e.serverName)); // 排除已收编的
 }
 
-// 收编一个外部实例：加入应用 config 并同步（文件里的原条目保持不动，由应用接管开关）
+// 收编一个外部实例：加入应用 config、从文件摘除原条目（防 serverName 冲突）、再同步
 export async function adoptMcp(external) {
   if (!external || !external.serverName) throw new Error('无效实例'); // 校验
   const defs = getAllMcpDefs(); // 现有定义
   if (defs.some((d) => d.serverName === external.serverName)) throw new Error(`MCP ${external.serverName} 已存在`); // 重名拒绝
+  // 关键：先从文件摘除原条目——dsh 规定存活实例中重复 serverName 会使后加载的插件实例失败，
+  // 若原条目保留，标记段里收编的副本会与原实例冲突导致整个 MCP 加载失败
+  await removeExternalEntryFromFile(external.serverName); // 摘除原文条目
   const def = { // 转应用定义格式
     serverName: external.serverName, // 命名空间
     transport: external.transport, // 传输
@@ -260,6 +263,63 @@ export async function adoptMcp(external) {
   defs.push(def); // 加入
   saveMcpDefs(defs); // 存配置
   await syncToPatchFile(); // 同步（标记段接管开关管理）
+}
+
+// 从 cordis.patch.yml 文本级摘除含目标 serverName 的外部 MCP 顶层条目
+// （不整体 YAML 往返，注释与格式保留；写前已有 .bak 备份）
+async function removeExternalEntryFromFile(serverName) {
+  const path = getCordisPatchPath(); // 目标文件
+  if (!existsSync(path)) return; // 无文件
+  const text = await readFile(path, 'utf8'); // 读文本
+  // 摘掉标记段后再切分（避免误判自家条目）
+  let cleaned = text; // 处理文本
+  const beginIdx = cleaned.indexOf(MARK_BEGIN); // 标记段起点
+  if (beginIdx >= 0) { // 有标记段
+    const endIdx = cleaned.indexOf(MARK_END, beginIdx); // 终点
+    if (endIdx >= 0) cleaned = cleaned.slice(0, beginIdx) + cleaned.slice(endIdx + MARK_END.length + 1); // 切除标记段
+  }
+  const lines = cleaned.split('\n'); // 按行
+  const kept = []; // 保留行
+  let entry = null; // 当前顶层条目（以 "- " 起始的块）
+  const entries = []; // 全部顶层条目块
+  for (const line of lines) { // 逐行切分
+    if (/^- /.test(line)) { // 新顶层条目起点
+      if (entry) entries.push(entry); // 收尾前一条
+      entry = { start: null, lines: [line] }; // 开新块
+    } else if (entry) {
+      entry.lines.push(line); // 追加到当前块
+    } else {
+      kept.push(line); // 条目外内容（文件头注释等）
+    }
+  }
+  if (entry) entries.push(entry); // 收尾最后一条
+  let removed = false; // 是否摘除过
+  for (const e of entries) { // 逐块判断
+    const body = e.lines.join('\n'); // 块文本
+    let parsed = null; // 解析结果
+    try { parsed = yaml.load(body, { schema: yaml.DEFAULT_FULL_SCHEMA.extend([JsExpr]) }); } catch { /* 解析失败整块保留 */ }
+    let hit = false; // 该块是否含目标 mcp
+    let mixed = false; // 该块是否混有其他内容
+    if (Array.isArray(parsed)) { // 顶层数组块
+      for (const entryObj of parsed) { // 块内条目
+        if (entryObj && Array.isArray(entryObj.insert)) { // insert 型
+          for (const it of entryObj.insert) { // 逐实例
+            const isMcp = it?.name === '@deepseek-ai/dsh-mcp-client'; // 是否 MCP 客户端
+            const isTarget = isMcp && it?.config?.serverName === serverName; // 是否目标
+            if (isTarget) hit = true; // 命中
+            else if (isMcp) mixed = true; // 同块还有别的 MCP
+            else if (it) mixed = true; // 同块混有其他插件
+          }
+        } else if (entryObj) { mixed = true; } // 其他类型条目
+      }
+    } else if (parsed) { mixed = true; } // 非数组结构
+    if (hit && !mixed) { removed = true; continue; } // 纯目标块 → 摘除
+    kept.push(...e.lines); // 否则保留
+  }
+  if (removed) { // 有变化才写（sync 前的备份在 syncToPatchFile 里做，这里先备份一次）
+    if (existsSync(path)) await copyFile(path, path + '.bak'); // 写前备份
+    await writeFile(path, kept.join('\n').replace(/\n{3,}/g, '\n\n'), 'utf8'); // 写回（压缩多余空行）
+  }
 }
 
 export { listMcps, addMcp, removeMcp, toggleMcp, getAllMcpDefs };

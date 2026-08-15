@@ -71,15 +71,20 @@ export function registerIpc(deps) {
     await toggleSkill(id, enabled); // 移动目录
     return listSkills(); // 返回最新列表
   });
-  ipcMain.handle(IPC.SKILL_INSTALL, async () => { // 安装（选目录对话框）
+  ipcMain.handle(IPC.SKILL_INSTALL, async () => { // 安装（文件夹或 zip 压缩包）
     const win = getMainWindow(); // 父窗口
-    const result = await dialog.showOpenDialog(win, { // 目录选择
-      title: '选择技能文件夹', // 标题
-      properties: ['openDirectory'] // 只选目录
+    const result = await dialog.showOpenDialog(win, { // 选择对话框
+      title: '选择技能文件夹或 zip 压缩包', // 标题
+      properties: ['openFile', 'openDirectory'], // 文件与目录都可选
+      filters: [{ name: '技能包', extensions: ['zip'] }] // 文件过滤 zip
     });
     if (result.canceled || !result.filePaths.length) return null; // 取消
-    await installSkill(result.filePaths[0]); // 复制安装
-    return listSkills(); // 返回最新列表
+    try { // 安装（zip 内部解压）
+      await installSkill(result.filePaths[0]); // 复制/解压安装
+      return listSkills(); // 返回最新列表
+    } catch (err) { // 安装失败
+      return { error: String(err?.message ?? err) }; // 把错误带回面板展示
+    }
   });
   ipcMain.handle('skills:content', async (_e, id) => readSkillContent(id)); // 展开正文（临时通道）
 

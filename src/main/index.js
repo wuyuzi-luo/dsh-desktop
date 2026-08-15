@@ -1,7 +1,7 @@
 // 主进程入口：生命周期编排（AUMID → 单实例锁 → 窗口 → 服务托管 → SSE → 托盘 → IPC）
 // 参考 anywhere-labs main.ts 的职责划分：托管、生命周期、窗口三者分离
 
-import { app, globalShortcut } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
+import { app, globalShortcut, Notification } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
 import { createHostSupervisor } from './host-supervisor.js'; // 服务托管
 import { createEventBridge } from './event-bridge.js'; // SSE 事件桥
 import { createNotifier } from './notifications.js'; // 桌面通知
@@ -79,6 +79,20 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     // 1. 主窗口（先显示 boot 过渡页）
     const win = createMainWindow(); // 创建（内部已加载 boot.html）
+    // 关窗 = 隐藏到托盘（显式退出才真关）；首次隐藏弹提示消除"以为退了"的困惑
+    let hideHintShown = false; // 首次提示标记（会话内）
+    win.on('close', (e) => { // 拦截关闭
+      if (quitting) return; // 显式退出中 → 放行
+      e.preventDefault(); // 阻止默认关闭
+      win.hide(); // 隐藏到托盘
+      if (!hideHintShown) { // 第一次隐藏
+        hideHintShown = true; // 标记
+        try { // 弹提示：消除"关窗以为退了"的困惑
+          const n = new Notification({ title: 'dsh 桌面仍在后台运行', body: '窗口已最小化到系统托盘，右键鲸鱼图标可退出', silent: false }); // 提示内容
+          n.show(); // 弹出
+        } catch { /* 通知失败忽略 */ }
+      }
+    });
 
     // 2. 服务托管
     supervisor = createHostSupervisor(); // 建托管器
@@ -96,6 +110,9 @@ if (!gotLock) {
       }
     });
     const result = await supervisor.ensureRunning(); // 确保服务（复用或新起）
+    supervisor.startHeartbeat(() => { // 心跳：服务意外死亡时通知
+      notifier?.onServiceError('dsh 服务意外停止，可在控制面板点击重启'); // 弹通知
+    });
 
     // 3. SSE 事件桥 + 通知
     bridge = createEventBridge(); // 建桥

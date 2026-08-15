@@ -2,11 +2,15 @@
 // dsh-skill-filesystem 的扫描根：$DSH_HOME/skills、~/.agents/skills、项目 .dsh/skills
 // 停用 = 移入 $DSH_HOME/skills-disabled（移出扫描根，chokidar 热生效）
 
-import { readdir, readFile, stat, mkdir, copyFile, rename } from 'node:fs/promises'; // 文件操作
+import { readdir, readFile, mkdir, copyFile, rename, rm } from 'node:fs/promises'; // 文件操作
 import { existsSync } from 'node:fs'; // 存在性检查
-import { join, basename } from 'node:path'; // 路径拼接
-import { homedir } from 'node:os'; // 用户主目录
-import { getSkillsDir, getDisabledSkillsDir, getConfig } from './config.js'; // 目录配置
+import { join, basename, extname } from 'node:path'; // 路径拼接
+import { homedir, tmpdir } from 'node:os'; // 用户主目录与临时目录
+import { execFile } from 'node:child_process'; // 调 PowerShell 解压 zip（Windows 自带，零新依赖）
+import { promisify } from 'node:util'; // 回调转 Promise
+import { getSkillsDir, getDisabledSkillsDir } from './config.js'; // 目录配置
+
+const execFileP = promisify(execFile); // PowerShell 调用 Promise 化
 
 // 列出所有技能扫描根（dsh-skill-filesystem 的约定目录）
 export function getSkillRoots() {
@@ -100,14 +104,44 @@ export async function readSkillContent(id) {
   return readFile(file, 'utf8'); // 返回全文
 }
 
-// 安装技能：把源文件夹复制到 $DSH_HOME/skills
-export async function installSkill(sourceDir) {
-  if (!existsSync(sourceDir)) throw new Error('源目录不存在'); // 校验
-  const name = basename(sourceDir); // 目标名取末级目录名
+// 安装技能：支持文件夹或 .zip 压缩包，复制到 $DSH_HOME/skills
+export async function installSkill(sourcePath) {
+  if (!existsSync(sourcePath)) throw new Error('源路径不存在'); // 校验
+  let srcDir = sourcePath; // 实际要复制的目录（zip 先解压）
+  let tmpDir = null; // zip 解压临时目录（事后清理）
+  if (extname(sourcePath).toLowerCase() === '.zip') { // zip 压缩包
+    tmpDir = join(tmpdir(), `dsh-skill-extract-${Date.now()}`); // 临时解压目录
+    await mkdir(tmpDir, { recursive: true }); // 建目录
+    try { // 用 Windows 自带 PowerShell 解压（零新依赖）
+      await execFileP('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${sourcePath}' -DestinationPath '${tmpDir}' -Force`], { timeout: 120000 }); // 解压
+    } catch (err) { // 解压失败
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {}); // 清理
+      throw new Error('zip 解压失败: ' + String(err?.message ?? err)); // 报错
+    }
+    srcDir = await findSkillRootIn(tmpDir); // 在解压产物中找含 SKILL.md 的目录（跳过外层包裹目录）
+    if (!srcDir) { // 没找到技能结构
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {}); // 清理
+      throw new Error('压缩包内未找到 SKILL.md，不是有效的技能包'); // 报错
+    }
+  }
+  const name = basename(srcDir); // 目标名取末级目录名
   const target = join(getSkillsDir(), name); // 安装落点
   if (existsSync(target)) throw new Error(`技能 ${name} 已存在`); // 防覆盖
   await mkdir(getSkillsDir(), { recursive: true }); // 确保根目录
-  await copyDir(sourceDir, target); // 递归复制
+  await copyDir(srcDir, target); // 递归复制
+  if (tmpDir) await rm(tmpDir, { recursive: true, force: true }).catch(() => {}); // 清理临时目录
+}
+
+// 在解压产物中定位技能根目录：自身含 SKILL.md 直接返回；否则递归找子目录
+async function findSkillRootIn(dir) {
+  if (existsSync(join(dir, 'SKILL.md'))) return dir; // 自身就是技能根
+  const entries = await readdir(dir, { withFileTypes: true }); // 列子项
+  for (const e of entries) { // 逐子目录
+    if (!e.isDirectory()) continue; // 只找目录
+    const sub = await findSkillRootIn(join(dir, e.name)); // 递归
+    if (sub) return sub; // 找到即返回
+  }
+  return null; // 没有
 }
 
 // 递归复制目录（Node 无内置，自写小工具）

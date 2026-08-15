@@ -169,5 +169,27 @@ export function createHostSupervisor() {
     return stderrTail; // 返回收集的错误尾部
   }
 
-  return { ensureRunning, stop, restart, onStatus, getStatus, findListenerPid, probeExisting, getStderrTail };
+  // 心跳探测：每 10 秒探测一次服务，连续 3 次失败判定服务意外死亡
+  // （dsh 崩溃/被外部杀掉时应用状态机转 error，面板红灯 + 通知，避免"假运行"）
+  let heartbeatTimer = null; // 心跳定时器
+  let heartbeatFailures = 0; // 连续失败计数
+  function startHeartbeat(onDead) {
+    if (heartbeatTimer) return; // 已启动
+    heartbeatTimer = setInterval(async () => { // 定时探测
+      if (state !== 'running') { heartbeatFailures = 0; return; } // 非运行态不探测
+      const port = getConfig('port'); // 目标端口
+      const ok = await probeExisting(port); // 探测（HTTP 200 + dsh 特征）
+      if (ok) { heartbeatFailures = 0; return; } // 正常 → 复位计数
+      heartbeatFailures += 1; // 累加失败
+      if (heartbeatFailures >= 3) { // 连续 3 次失败（约 30 秒）
+        heartbeatFailures = 0; // 复位
+        if (owned && child) { try { child.kill(); } catch { /* 已死忽略 */ } child = null; owned = false; } // 清理托管句柄
+        setState('error'); // 状态转 error（面板红灯 + boot 错误页）
+        onDead?.(); // 通知回调（index.js 弹"服务异常"通知）
+      }
+    }, 10_000); // 10 秒间隔
+    heartbeatTimer.unref?.(); // 不阻止应用退出
+  }
+
+  return { ensureRunning, stop, restart, onStatus, getStatus, findListenerPid, probeExisting, getStderrTail, startHeartbeat };
 }

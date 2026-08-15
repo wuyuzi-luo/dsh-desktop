@@ -53,10 +53,22 @@ export async function checkForUpdates({ manual = false } = {}) {
     }
     const asset = (release.assets ?? []).find((a) => String(a.name).endsWith('.exe')); // 找安装包资源
     if (!asset) throw new Error('no exe asset'); // 无安装包
-    setState('downloading', { version: remote, url: asset.browser_download_url }); // 进入下载
+    setState('downloading', { version: remote, url: asset.browser_download_url, percent: 0 }); // 进入下载（0%）
     const dl = await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(600000) }); // 下载安装包（最长 10 分钟）
-    if (!dl.ok) throw new Error(`download HTTP ${dl.status}`); // 下载失败
-    const buf = Buffer.from(await dl.arrayBuffer()); // 转缓冲
+    if (!dl.ok || !dl.body) throw new Error(`download HTTP ${dl.status}`); // 下载失败
+    // 流式读取：边下载边报进度（面板显示百分比）
+    const total = Number(dl.headers.get('content-length')) || 0; // 总字节（缺省 0 表示未知）
+    const reader = dl.body.getReader(); // 流读取器
+    const chunks = []; // 分块缓冲
+    let received = 0; // 已收字节
+    while (true) { // 持续读流
+      const { done, value } = await reader.read(); // 读一块
+      if (done) break; // 完成
+      chunks.push(value); // 收集
+      received += value.length; // 累加
+      if (total) setState('downloading', { version: remote, percent: Math.round((received / total) * 100) }); // 报进度
+    }
+    const buf = Buffer.concat(chunks); // 合并为完整缓冲
     const dlDir = app.getPath('downloads'); // 用户下载目录
     await mkdir(dlDir, { recursive: true }); // 确保存在
     const filePath = join(dlDir, `dsh-desktop-setup-${remote}.exe`); // 目标文件
