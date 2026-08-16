@@ -14,6 +14,7 @@ const els = {
   btnRestart: document.getElementById('btnRestart'), // 重启服务
   btnUpdate: document.getElementById('btnUpdate'), // 检查更新
   btnGuide: document.getElementById('btnGuide'), // 使用说明
+  btnClose: document.getElementById('btnClose'), // 关闭面板
   skillAdd: document.getElementById('skillAdd'), // 添加技能
   mcpAdd: document.getElementById('mcpAdd'), // 添加 MCP
   mcpModal: document.getElementById('mcpModal') // MCP 表单弹层
@@ -186,6 +187,7 @@ els.btnUpdate.addEventListener('click', async () => { // 检查更新
   setTimeout(refreshAll, 2000); // 稍后刷新
 });
 els.btnGuide.addEventListener('click', () => window.dshDesktop.openGuide()); // 主窗口打开使用说明
+els.btnClose.addEventListener('click', () => window.close()); // 关闭面板（主进程 closed 事件会清引用，可再次 Ctrl+Shift+D 呼出）
 
 // 技能添加：调主进程弹选择（文件夹或 zip）
 els.skillAdd.addEventListener('click', async () => { // 安装技能

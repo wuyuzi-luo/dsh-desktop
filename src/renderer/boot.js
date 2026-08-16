@@ -41,8 +41,8 @@ function render(state, url) {
     setupEl.hidden = false; // 显示三选项
     setSetupEnabled(true); // 恢复按钮可用
   } else if (state === 'error') { // 错误
-    statusEl.textContent = 'dsh 服务启动失败'; // 文案
-    subEl.textContent = '请检查 dsh 安装或点击重试'; // 副文案
+    statusEl.textContent = 'dsh 服务异常'; // 文案
+    subEl.textContent = '请完全退出应用（托盘鲸鱼图标右键 → 退出）后重新进入一次；仍异常可点击重试'; // 副文案
     retryBtn.hidden = false; // 显示重试
   } else { // stopped
     statusEl.textContent = 'dsh 服务已停止'; // 文案

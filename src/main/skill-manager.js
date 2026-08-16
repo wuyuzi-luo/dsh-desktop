@@ -12,13 +12,15 @@ import { getSkillsDir, getDisabledSkillsDir } from './config.js'; // 目录配�
 
 const execFileP = promisify(execFile); // PowerShell 调用 Promise 化
 
-// 列出所有技能扫描根（dsh-skill-filesystem 的约定目录）
+// 列出所有技能扫描根（dsh-skill-filesystem 的约定目录 + Claude Code 技能目录）
 export function getSkillRoots() {
   const roots = []; // 结果
   const skillsDir = getSkillsDir(); // $DSH_HOME/skills（用户级，安装落点）
   const agentsDir = join(homedir(), '.agents', 'skills'); // ~/.agents/skills（共享 agent 目录）
+  const claudeDir = join(homedir(), '.claude', 'skills'); // ~/.claude/skills（Claude Code 技能，只读展示）
   roots.push({ path: skillsDir, label: 'dsh 用户技能', priority: 400 }); // 主扫描根
   roots.push({ path: agentsDir, label: '共享 agent 技能', priority: 500 }); // 副扫描根
+  roots.push({ path: claudeDir, label: 'Claude Code 技能', priority: 600 }); // Claude Code 技能目录（格式同为 SKILL.md）
   return roots; // 返回
 }
 

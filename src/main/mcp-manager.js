@@ -4,6 +4,8 @@
 import yaml from 'js-yaml'; // YAML 解析/序列化（只处理应用自己的标记段）
 import { readFile, writeFile, copyFile } from 'node:fs/promises'; // 文件读写与备份
 import { existsSync } from 'node:fs'; // 存在性检查
+import { join } from 'node:path'; // 路径拼接
+import { homedir } from 'node:os'; // 用户主目录（~/.claude.json 位置）
 import { getCordisPatchPath, getConfig, setConfig } from './config.js'; // 路径与配置存取
 
 // 标记段注释（在 patch 文件里圈出应用托管区域，文件其余内容不动）
@@ -234,11 +236,45 @@ async function findExternalMcps() {
   return found; // 返回发现列表
 }
 
-// 列出可导入的外部 MCP（面板"导入已有"视图）
+// 扫描 Claude Code 用户级配置（~/.claude.json）顶层 mcpServers，转成可导入摘要
+async function findClaudeMcps() {
+  const claudeJson = join(homedir(), '.claude.json'); // Claude Code 配置文件路径
+  if (!existsSync(claudeJson)) return []; // 没有配置文件
+  let parsed = null; // 解析结果
+  try {
+    parsed = JSON.parse(await readFile(claudeJson, 'utf8')); // 读并解析
+  } catch { return []; } // 解析失败（语法错误/被占用）→ 空
+  const servers = parsed?.mcpServers ?? {}; // 顶层 mcpServers 表
+  const found = []; // 结果
+  for (const [name, def] of Object.entries(servers)) { // 逐服务器
+    if (!def || typeof def !== 'object') continue; // 非法条目跳过
+    const entry = { // 组装可导入摘要
+      id: `claude:${name}`, // 唯一 id（前缀区分来源）
+      serverName: name, // 命名空间
+      source: 'Claude Code', // 来源标签（面板展示）
+      command: def.command, // stdio 命令
+      args: Array.isArray(def.args) ? def.args : undefined, // 参数
+      url: def.url, // http URL
+      env: def.env && Object.keys(def.env).length ? def.env : undefined, // 环境变量
+      headers: def.headers && Object.keys(def.headers).length ? def.headers : undefined // 头信息
+    };
+    // 传输方式推断：有 URL 且无命令 → http；否则 stdio
+    entry.transport = (entry.url && !entry.command) ? 'streamable-http' : 'stdio';
+    if (entry.transport === 'stdio' && !entry.command) continue; // 既无命令又无 URL 的跳过
+    found.push(entry); // 收集
+  }
+  return found; // 返回
+}
+
+// 列出可导入的外部 MCP（面板"导入已有"视图）：dsh patch 手写条目 + Claude Code 配置
 export async function listImportableMcps() {
-  const externals = await findExternalMcps(); // 扫描文件
+  const [fromPatch, fromClaude] = await Promise.all([ // 并行扫两个来源
+    findExternalMcps(), // dsh cordis.patch.yml 手写条目
+    findClaudeMcps() // Claude Code ~/.claude.json
+  ]);
+  const merged = [...fromPatch, ...fromClaude]; // 合并
   const managedNames = new Set(getAllMcpDefs().map((d) => d.serverName)); // 已管理名称
-  return externals.filter((e) => !managedNames.has(e.serverName)); // 排除已收编的
+  return merged.filter((e) => !managedNames.has(e.serverName)); // 排除已收编的
 }
 
 // 收编一个外部实例：加入应用 config、从文件摘除原条目（防 serverName 冲突）、再同步
