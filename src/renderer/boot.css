@@ -47,10 +47,25 @@ body {
   text-decoration: none; cursor: pointer; letter-spacing: 0.5px;
 }
 .link:hover { text-decoration: underline; filter: brightness(1.2); }
+.link[hidden] { display: none; } /* hidden 属性优先于 display（修复误显示） */
+
+/* Node.js 前置条件提示（大字、居中、醒目橙金色） */
+.node-hint {
+  color: #f0b429; font-size: 17px; font-weight: 600;
+  letter-spacing: 0.5px; line-height: 1.7; margin-bottom: 6px;
+  text-shadow: 0 0 18px rgba(240, 180, 41, 0.35); /* 微光晕更醒目 */
+}
+.hint-link { color: #4D6BFE; cursor: pointer; text-decoration: underline; }
 
 /* missing 态三选项容器（纵向排列） */
 .setup { margin-top: 26px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.setup .btn { margin-top: 0; width: 240px; padding: 9px 20px; }
+.setup[hidden] { display: none; } /* hidden 属性优先于 display（修复误显示） */
+.setup-btns { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 4px; }
+.setup-btns[hidden] { display: none; } /* hidden 属性优先于 display */
+.setup .btn { margin-top: 0; width: 360px; padding: 9px 20px; }
+.pick-note { /* 选择目录按钮下方的说明小字 */
+  color: #5d6b98; font-size: 11.5px; line-height: 1.6; margin-top: -4px;
+}
 .setup .btn.ghost { /* 次要按钮：描边幽灵样式 */
   background: transparent; border: 1px solid rgba(77, 107, 254, 0.5); color: #8fa3e8;
 }

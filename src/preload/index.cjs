@@ -11,6 +11,7 @@ const IPC = {
   SERVICE_RETRY: 'service:retry', // 服务重试
   SETUP_PICK_DSH_DIR: 'setup:pick-dsh-dir', // 选择 dsh 安装目录
   SETUP_AUTO_INSTALL: 'setup:auto-install', // 自动安装 dsh
+  SETUP_CHECK_NODE: 'setup:check-node', // 检测 Node.js
   GUIDE_ENTER: 'guide:enter', // 引导页进入工作台
   GUIDE_OPEN: 'guide:open', // 打开使用说明
   OPEN_EXTERNAL: 'app:open-external', // 打开外部链接
@@ -51,6 +52,8 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   pickDshDir: () => ipcRenderer.invoke(IPC.SETUP_PICK_DSH_DIR),
   // 自动安装 dsh（boot 页 missing 态"帮我安装"）
   autoInstallDsh: () => ipcRenderer.invoke(IPC.SETUP_AUTO_INSTALL),
+  // 检测 Node.js 是否安装且版本达标
+  checkNode: () => ipcRenderer.invoke(IPC.SETUP_CHECK_NODE),
   // 引导页"进入工作台"
   enterWorkbench: () => ipcRenderer.invoke(IPC.GUIDE_ENTER),
   // 打开使用说明引导页

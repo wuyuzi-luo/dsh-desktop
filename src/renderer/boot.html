@@ -20,11 +20,23 @@
     <!-- 状态文案 -->
     <div class="status" id="status">正在启动 dsh 服务…</div>
     <div class="sub" id="sub">DeepSeek Harness 桌面</div>
-    <!-- missing 态三选项：帮我安装 / 选择已安装目录 / 取消（自己装） -->
+    <!-- missing 态：先确认 Node.js → 再显示三选项 -->
     <div class="setup" id="setup" hidden>
-      <button class="btn primary" id="install-dsh">帮我安装</button>
-      <button class="btn" id="pick-dir">选择已安装目录</button>
-      <button class="btn ghost" id="cancel-setup">取消，我自己安装</button>
+      <!-- Node.js 前置条件醒目提示（大字居中） -->
+      <div class="node-hint" id="node-hint">注意！自动安装 dsh 之前，需要 Node.js 22.19+ 或 24+，请确认是否安装了 Node.js
+        <br>
+        <a class="hint-link" id="node-hint-link">📥 未安装？点此下载</a>
+      </div>
+      <!-- 确认按钮：点击后系统检测 Node，达标才放出下方三个选项 -->
+      <button class="btn primary" id="confirm-node">我已确认安装 Node.js</button>
+      <!-- 三选项（检测到 Node 后才显示） -->
+      <div class="setup-btns" id="setup-btns" hidden>
+        <button class="btn primary" id="install-dsh">帮我安装 DeepSeek Harness</button>
+        <button class="btn" id="pick-dir">选择 DeepSeek Harness 已安装的目录文件</button>
+        <!-- 选择目录的说明：告诉用户要选什么样的目录 -->
+        <div class="pick-note">请选择包含 node_modules\@deepseek-ai\dsh 的安装目录<br>（例如 D:\deepseek-harness）</div>
+        <button class="btn ghost" id="cancel-setup">取消，我自己安装 DeepSeek Harness</button>
+      </div>
       <!-- 自动安装的实时日志（仅安装期间显示） -->
       <pre class="log" id="install-log" hidden></pre>
     </div>

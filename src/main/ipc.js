@@ -15,6 +15,19 @@ import { getConfig, setConfig, isValidDshDir, setDshDir } from './config.js'; //
 const execP = promisify(exec); // Promise 化 exec（Node 版本检测用）
 let installing = false; // 自动安装防重入标志（模块级）
 
+// 检测 Node.js 是否安装且版本达标（dsh 官方要求 ^22.19.0 || >=24.0.0）
+async function checkNodeVersion() {
+  try {
+    const { stdout } = await execP('node -v'); // 取版本串（如 v24.16.0）
+    const version = stdout.trim().replace(/^v/, ''); // 去 v 前缀
+    const [major = 0, minor = 0] = version.split('.').map(Number); // 解析主次版本
+    const ok = major >= 24 || (major === 22 && minor >= 19); // 官方支持范围判断
+    return { ok, version }; // 返回结果
+  } catch {
+    return { ok: false, version: null }; // node 不在 PATH 视为未安装
+  }
+}
+
 // 组装面板状态快照（面板打开/刷新时拉取一次全量）
 export async function buildStateSnapshot(deps) {
   const { supervisor, updater } = deps; // 依赖解构
@@ -57,7 +70,8 @@ export function registerIpc(deps) {
   ipcMain.handle(IPC.SETUP_PICK_DSH_DIR, async () => {
     const win = getMainWindow(); // 父窗口
     const result = await dialog.showOpenDialog(win, { // 目录选择对话框
-      title: '选择 dsh 安装目录', // 标题
+      title: '选择 DeepSeek Harness（dsh）安装目录', // 标题
+      message: '请选择包含 node_modules\\@deepseek-ai\\dsh 的安装目录（如 D:\\deepseek-harness）', // 对话框内说明文字
       buttonLabel: '使用此目录', // 确认按钮文案
       properties: ['openDirectory'] // 只选目录
     });
@@ -70,6 +84,9 @@ export function registerIpc(deps) {
     await supervisor?.restart(); // 重新拉起服务（状态推送会驱动 boot 页跳转）
     return { ok: true }; // 回报成功
   });
+
+  // 检测 Node.js（boot 页"我已确认安装 Node.js"按钮）
+  ipcMain.handle(IPC.SETUP_CHECK_NODE, () => checkNodeVersion()); // 返回 { ok, version }
 
   // 自动安装 dsh（boot 页 missing 态"帮我安装"）：Node 检测 → npm install → 校验 → 写配置 → 重启
   ipcMain.handle(IPC.SETUP_AUTO_INSTALL, async () => {
@@ -196,13 +213,8 @@ async function autoInstallDsh(deps) {
   const push = (phase, text) => pushBootState(win, { type: 'setup', phase, text }); // 进度推送便捷函数
 
   // 1. 检测 Node.js（dsh 官方要求 ^22.19.0 || >=24.0.0）
-  let nodeOk = false; // 版本是否达标
-  try {
-    const { stdout } = await execP('node -v'); // 取版本串（如 v24.16.0）
-    const [major = 0, minor = 0] = stdout.trim().replace(/^v/, '').split('.').map(Number); // 解析主次版本
-    nodeOk = major >= 24 || (major === 22 && minor >= 19); // 官方支持范围判断
-  } catch { nodeOk = false; } // node 不在 PATH 视为未安装
-  if (!nodeOk) { // Node 缺失或版本不足
+  const node = await checkNodeVersion(); // 复用统一检测函数
+  if (!node.ok) { // Node 缺失或版本不足
     push('error', '未检测到可用的 Node.js（需要 22.19+ 或 24+）。请先安装 Node.js 后点击重试'); // 引导文案
     return { error: 'need-node' }; // 返回错误码（boot 页展示）
   }

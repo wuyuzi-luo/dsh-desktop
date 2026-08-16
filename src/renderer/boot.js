@@ -11,6 +11,9 @@ const pickDirBtn = document.getElementById('pick-dir'); // 选择已安装目录
 const cancelBtn = document.getElementById('cancel-setup'); // 取消按钮
 const logEl = document.getElementById('install-log'); // 安装日志框
 const nodeLink = document.getElementById('node-link'); // Node.js 下载链接（need-node 时显示）
+const nodeHint = document.getElementById('node-hint'); // Node.js 前置条件提示行
+const confirmNodeBtn = document.getElementById('confirm-node'); // "我已确认安装 Node.js"按钮
+const setupBtns = document.getElementById('setup-btns'); // 三选项容器（确认 Node 后显示）
 
 // 设置三选项按钮可用性（安装期间禁用防重复点击）
 function setSetupEnabled(enabled) {
@@ -38,9 +41,12 @@ function render(state, url) {
       setTimeout(() => { window.location.replace(url); }, 500); // 半秒后跳转
     }
   } else if (state === 'missing') { // 未找到 dsh 安装（CLI 入口不存在）
-    statusEl.textContent = '未找到 dsh'; // 文案
-    subEl.textContent = '使用前需要安装 dsh（DeepSeek Harness），请选择处理方式'; // 引导说明
-    setupEl.hidden = false; // 显示三选项
+    statusEl.textContent = '未识别到用户已安装 DeepSeek Harness（dsh）'; // 文案
+    subEl.textContent = '请先确认 Node.js 环境，再选择安装方式'; // 引导说明
+    setupEl.hidden = false; // 显示引导区
+    nodeHint.hidden = false; // 显示 Node.js 提示
+    confirmNodeBtn.hidden = false; // 显示确认按钮
+    setupBtns.hidden = true; // 三选项先隐藏（确认 Node 后才放出，避免小白搞混）
     setSetupEnabled(true); // 恢复按钮可用
   } else if (state === 'error') { // 错误
     statusEl.textContent = 'dsh 服务异常'; // 文案
@@ -76,6 +82,23 @@ retryBtn.addEventListener('click', async () => {
   retryBtn.hidden = true; // 隐藏按钮
   const result = await window.dshDesktop.retryService(); // 调主进程
   if (result === 'missing') render('missing'); // 仍然缺 dsh → 重新显示三选项
+});
+
+// "我已确认安装 Node.js"按钮：系统自动检测，达标才放出三选项
+confirmNodeBtn.addEventListener('click', async () => {
+  confirmNodeBtn.disabled = true; // 防重复点击
+  confirmNodeBtn.textContent = '正在检测…'; // 反馈
+  const result = await window.dshDesktop.checkNode(); // 调主进程检测
+  confirmNodeBtn.textContent = '我已确认安装 Node.js'; // 恢复文案
+  confirmNodeBtn.disabled = false; // 恢复可用
+  if (result && result.ok) { // 检测通过
+    nodeHint.hidden = true; // 收起提示
+    confirmNodeBtn.hidden = true; // 收起确认按钮
+    setupBtns.hidden = false; // 放出三选项
+    subEl.textContent = `✅ 已检测到 Node.js v${result.version}，请选择安装方式`; // 确认反馈
+  } else { // 未检测到
+    subEl.textContent = '❌ 未检测到 Node.js（需要 22.19+ 或 24+），请先安装后再点确认'; // 提示先装
+  }
 });
 
 // 取消按钮：用户打算自己安装 dsh，收起三选项只留重试
@@ -123,6 +146,12 @@ installBtn.addEventListener('click', async () => {
 
 // Node.js 下载链接：默认浏览器打开官网（小白一键安装）
 nodeLink.addEventListener('click', () => {
+  window.dshDesktop.openExternal('https://nodejs.org/zh-cn/download'); // 中文官网下载页
+});
+
+// 三选项界面里的 Node.js 提示链接（与上方独立链接同行为）
+const nodeHintLink = document.getElementById('node-hint-link'); // 提示行内链接
+nodeHintLink.addEventListener('click', () => {
   window.dshDesktop.openExternal('https://nodejs.org/zh-cn/download'); // 中文官网下载页
 });
 
