@@ -1,7 +1,7 @@
 // IPC 注册模块：面板/boot 页与主进程的全部通信入口
 // 依赖由 index.js 注入（supervisor/notifier/updater），避免模块间循环引用
 
-import { ipcMain, app, dialog } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
+import { ipcMain, app, dialog, shell } from 'electron'; // Electron 命名导入（shell 打开外部链接）
 import { spawn, exec } from 'node:child_process'; // spawn 跑 npm 安装；exec 检测 Node 版本
 import { promisify } from 'node:util'; // 把回调 API 转 Promise
 import { mkdirSync, existsSync } from 'node:fs'; // 建安装目录 / 判断盘符存在
@@ -113,6 +113,14 @@ export function registerIpc(deps) {
   ipcMain.handle(IPC.GUIDE_OPEN, () => {
     const win = getMainWindow(); // 主窗口
     if (win) { win.show(); win.restore(); win.focus(); loadGuide(win); } // 显示并加载引导页
+    return true;
+  });
+
+  // 用默认浏览器打开外部链接（仅允许 http/https，防协议注入）
+  ipcMain.handle(IPC.OPEN_EXTERNAL, async (_e, url) => {
+    const target = String(url ?? ''); // 目标地址
+    if (!/^https?:\/\//i.test(target)) return false; // 只放行网页链接
+    await shell.openExternal(target); // 打开默认浏览器
     return true;
   });
 

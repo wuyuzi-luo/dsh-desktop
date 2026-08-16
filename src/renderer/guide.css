@@ -27,6 +27,10 @@ body {
 .sec em { color: #4D6BFE; font-style: normal; font-weight: 600; }
 .sec code { background: rgba(10, 15, 31, 0.7); padding: 1px 6px; border-radius: 4px; font-size: 11.5px; color: #8fa3e8; }
 
+/* 外部链接 */
+.xlink { color: #4D6BFE; cursor: pointer; text-decoration: none; }
+.xlink:hover { text-decoration: underline; filter: brightness(1.2); }
+
 /* 进入按钮 */
 .btn {
   margin-top: 26px; padding: 10px 42px; font-size: 14px; color: #fff;

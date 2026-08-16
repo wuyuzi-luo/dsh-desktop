@@ -41,6 +41,13 @@ body {
 .btn:active { filter: brightness(0.95); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
 
+/* 外部下载链接（如 Node.js 官网） */
+.link {
+  display: inline-block; margin-top: 16px; color: #4D6BFE; font-size: 12.5px;
+  text-decoration: none; cursor: pointer; letter-spacing: 0.5px;
+}
+.link:hover { text-decoration: underline; filter: brightness(1.2); }
+
 /* missing 态三选项容器（纵向排列） */
 .setup { margin-top: 26px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .setup .btn { margin-top: 0; width: 240px; padding: 9px 20px; }

@@ -10,6 +10,7 @@ const installBtn = document.getElementById('install-dsh'); // 帮我安装按钮
 const pickDirBtn = document.getElementById('pick-dir'); // 选择已安装目录按钮
 const cancelBtn = document.getElementById('cancel-setup'); // 取消按钮
 const logEl = document.getElementById('install-log'); // 安装日志框
+const nodeLink = document.getElementById('node-link'); // Node.js 下载链接（need-node 时显示）
 
 // 设置三选项按钮可用性（安装期间禁用防重复点击）
 function setSetupEnabled(enabled) {
@@ -28,6 +29,7 @@ function render(state, url) {
   setupEl.hidden = true; // 默认隐藏三选项
   retryBtn.hidden = true; // 默认隐藏重试
   logEl.hidden = true; // 默认隐藏日志
+  nodeLink.hidden = true; // 默认隐藏下载链接
   if (state === 'starting') { // 启动中
     statusEl.textContent = '正在启动 dsh 服务…'; // 文案
   } else if (state === 'running') { // 运行中
@@ -61,6 +63,7 @@ window.dshDesktop.onState((payload) => {
       appendLog(payload.text); // 追加显示
     } else if (payload.phase === 'error') { // 安装失败
       subEl.textContent = payload.text; // 副文案展示失败原因（日志保留供查看）
+      if (payload.text.includes('Node.js')) nodeLink.hidden = false; // 缺 Node 时显示下载链接
     } else if (payload.phase === 'done') { // 安装完成
       statusEl.textContent = payload.text; // 更新主文案
     }
@@ -109,12 +112,18 @@ installBtn.addEventListener('click', async () => {
     subEl.textContent = (result.error === 'need-node') // 按错误码给文案
       ? '未检测到可用的 Node.js（需要 22.19+ 或 24+）。请先安装 Node.js 后重试'
       : (result.error === 'busy' ? '安装正在进行中，请稍候' : '安装失败，请检查网络后重试');
+    if (result.error === 'need-node') nodeLink.hidden = false; // 缺 Node：显示官网下载链接
     if (result.log) appendLog(result.log); // 有尾部日志则展示
     setSetupEnabled(true); // 恢复按钮可再次尝试
     return;
   }
   setupEl.hidden = true; // 成功：收起选项（后续状态由服务推送驱动）
   logEl.hidden = true; // 隐藏日志
+});
+
+// Node.js 下载链接：默认浏览器打开官网（小白一键安装）
+nodeLink.addEventListener('click', () => {
+  window.dshDesktop.openExternal('https://nodejs.org/zh-cn/download'); // 中文官网下载页
 });
 
 // 初始拉取一次当前状态（防止错过推送）

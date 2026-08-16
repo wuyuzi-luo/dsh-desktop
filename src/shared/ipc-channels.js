@@ -17,6 +17,8 @@ export const IPC = {
   GUIDE_ENTER: 'guide:enter',
   // 面板"使用说明"按钮 → 主窗口重新打开引导页
   GUIDE_OPEN: 'guide:open',
+  // 用默认浏览器打开外部链接（如 Node.js 下载页）
+  OPEN_EXTERNAL: 'app:open-external',
   // 面板"测试通知"按钮
   NOTIFY_TEST: 'notify:test',
   // 面板"打开工作台"按钮 → 显示主窗口

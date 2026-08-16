@@ -13,6 +13,7 @@ const IPC = {
   SETUP_AUTO_INSTALL: 'setup:auto-install', // 自动安装 dsh
   GUIDE_ENTER: 'guide:enter', // 引导页进入工作台
   GUIDE_OPEN: 'guide:open', // 打开使用说明
+  OPEN_EXTERNAL: 'app:open-external', // 打开外部链接
   NOTIFY_TEST: 'notify:test', // 测试通知
   APP_OPEN_WEB_UI: 'app:open-web-ui', // 打开工作台
   SERVICE_RESTART: 'service:restart', // 重启服务
@@ -54,6 +55,8 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   enterWorkbench: () => ipcRenderer.invoke(IPC.GUIDE_ENTER),
   // 打开使用说明引导页
   openGuide: () => ipcRenderer.invoke(IPC.GUIDE_OPEN),
+  // 用默认浏览器打开外部链接
+  openExternal: (url) => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
   // 服务重启
   restartService: () => ipcRenderer.invoke(IPC.SERVICE_RESTART),
   // 测试通知
