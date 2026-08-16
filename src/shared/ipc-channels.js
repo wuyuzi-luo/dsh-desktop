@@ -21,6 +21,12 @@ export const IPC = {
   GUIDE_OPEN: 'guide:open',
   // 用默认浏览器打开外部链接（如 Node.js 下载页）
   OPEN_EXTERNAL: 'app:open-external',
+  // 选择皮肤图片并应用
+  SKIN_SET: 'skin:set',
+  // 恢复默认背景
+  SKIN_CLEAR: 'skin:clear',
+  // 调节皮肤透明度（0~100，实时生效）
+  SKIN_OPACITY: 'skin:opacity',
   // 面板"测试通知"按钮
   NOTIFY_TEST: 'notify:test',
   // 面板"打开工作台"按钮 → 显示主窗口

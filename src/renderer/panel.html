@@ -52,6 +52,7 @@
     <button class="abtn" id="btnRestart">↻ 重启服务</button>
     <button class="abtn" id="btnUpdate">↻ 检查更新</button>
     <button class="abtn" id="btnDshUpdate" hidden>⬆ dsh</button>
+    <button class="abtn" id="btnSkin">🎨 皮肤</button>
     <button class="abtn" id="btnGuide">? 使用说明</button>
   </footer>
 
@@ -96,6 +97,25 @@
       <div class="modal-actions">
         <button class="abtn" id="mcpCancel">取消</button>
         <button class="abtn primary" id="mcpSave" hidden>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 皮肤弹层：选择图片应用 / 透明度调节 / 恢复默认 -->
+  <div class="modal" id="skinModal" hidden>
+    <div class="modal-body">
+      <h3>更换皮肤</h3>
+      <p class="hint">把本地图片设置为 dsh 工作台的背景（支持 png / jpg / webp / gif，10MB 以内）。切换与透明度调节实时生效，主窗口立即看到效果。</p>
+      <div class="mode-switch">
+        <button class="abtn primary" id="skinPick">🎨 选择图片应用</button>
+        <button class="abtn" id="skinReset">↺ 恢复默认背景</button>
+      </div>
+      <label style="display:flex;flex-direction:column;gap:4px;color:#9fb0e0;font-size:12px;margin-top:10px">
+        背景透明度：<span id="skinOpacityVal">100%</span>
+        <input type="range" id="skinOpacitySlider" min="10" max="100" value="100" />
+      </label>
+      <div class="modal-actions">
+        <button class="abtn" id="skinCancel">关闭</button>
       </div>
     </div>
   </div>

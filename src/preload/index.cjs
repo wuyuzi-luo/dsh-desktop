@@ -15,6 +15,9 @@ const IPC = {
   GUIDE_ENTER: 'guide:enter', // 引导页进入工作台
   GUIDE_OPEN: 'guide:open', // 打开使用说明
   OPEN_EXTERNAL: 'app:open-external', // 打开外部链接
+  SKIN_SET: 'skin:set', // 设置皮肤
+  SKIN_CLEAR: 'skin:clear', // 恢复默认背景
+  SKIN_OPACITY: 'skin:opacity', // 调节皮肤透明度
   NOTIFY_TEST: 'notify:test', // 测试通知
   APP_OPEN_WEB_UI: 'app:open-web-ui', // 打开工作台
   SERVICE_RESTART: 'service:restart', // 重启服务
@@ -60,6 +63,12 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   openGuide: () => ipcRenderer.invoke(IPC.GUIDE_OPEN),
   // 用默认浏览器打开外部链接
   openExternal: (url) => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
+  // 设置皮肤（弹图片选择器）
+  setSkin: () => ipcRenderer.invoke(IPC.SKIN_SET),
+  // 恢复默认背景
+  clearSkin: () => ipcRenderer.invoke(IPC.SKIN_CLEAR),
+  // 调节皮肤透明度（0~100 实时生效）
+  setSkinOpacity: (value) => ipcRenderer.invoke(IPC.SKIN_OPACITY, value),
   // 服务重启
   restartService: () => ipcRenderer.invoke(IPC.SERVICE_RESTART),
   // 测试通知

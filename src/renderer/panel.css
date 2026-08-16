@@ -13,8 +13,8 @@ body {
   -webkit-app-region: drag; /* 拖拽区域 */
   border-bottom: 1px solid rgba(77, 107, 254, 0.18);
 }
-.titlebar .dot { width: 10px; height: 10px; border-radius: 50%; background: #4D6BFE; }
-.titlebar .title { font-weight: 600; letter-spacing: 1px; }
+.titlebar .dot { width: 10px; height: 10px; border-radius: 50%; background: #4D6BFE; -webkit-app-region: drag; }
+.titlebar .title { font-weight: 600; letter-spacing: 1px; -webkit-app-region: drag; } /* 标题文字区域可拖动窗口 */
 .titlebar .ver { margin-left: auto; color: #5d6b98; font-size: 11px; -webkit-app-region: no-drag; }
 .titlebar .closebtn { /* 关闭按钮（无边框窗口必需） */
   margin-left: 8px; width: 22px; height: 22px; line-height: 20px; text-align: center;

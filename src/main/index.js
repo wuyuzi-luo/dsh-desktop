@@ -11,6 +11,7 @@ import { registerIpc, buildStateSnapshot } from './ipc.js'; // IPC 与状态快�
 import { initMcpManager } from './mcp-manager.js'; // MCP 同步
 import { createUpdater } from './updater.js'; // 更新器
 import { getConfig } from './config.js'; // 配置
+import { applySkin } from './skin.js'; // 皮肤背景注入
 
 // Windows 通知必须的应用标识（最早执行）
 app.setAppUserModelId('com.dshdesktop.app');
@@ -79,6 +80,10 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     // 1. 主窗口（先显示 boot 过渡页）
     const win = createMainWindow(); // 创建（内部已加载 boot.html）
+    // 页面每次加载完成后重新注入皮肤（工作台跳转/刷新后背景仍在）
+    win.webContents.on('dom-ready', () => {
+      if (win.webContents.getURL().startsWith('http')) applySkin(win); // 仅对 dsh 工作台注入
+    });
     // 关窗 = 隐藏到托盘（显式退出才真关）；首次隐藏弹提示消除"以为退了"的困惑
     let hideHintShown = false; // 首次提示标记（会话内）
     win.on('close', (e) => { // 拦截关闭

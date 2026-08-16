@@ -17,6 +17,13 @@ const els = {
   btnClose: document.getElementById('btnClose'), // 关闭面板
   btnDshUpdate: document.getElementById('btnDshUpdate'), // 更新 dsh 本体
   skillModal: document.getElementById('skillModal'), // Skill 添加弹层
+  btnSkin: document.getElementById('btnSkin'), // 皮肤按钮
+  skinModal: document.getElementById('skinModal'), // 皮肤弹层
+  skinPick: document.getElementById('skinPick'), // 选择图片应用
+  skinReset: document.getElementById('skinReset'), // 恢复默认
+  skinCancel: document.getElementById('skinCancel'), // 关闭弹层
+  skinOpacitySlider: document.getElementById('skinOpacitySlider'), // 透明度滑块
+  skinOpacityVal: document.getElementById('skinOpacityVal'), // 透明度数值
   skillModeManual: document.getElementById('skillModeManual'), // 手动安装模式
   skillModeImport: document.getElementById('skillModeImport'), // 自动搜索导入模式
   skillManualFields: document.getElementById('skillManualFields'), // 手动安装区
@@ -224,6 +231,26 @@ els.btnDshUpdate.addEventListener('click', async () => { // 确认更新 dsh 本
 });
 els.btnGuide.addEventListener('click', () => window.dshDesktop.openGuide()); // 主窗口打开使用说明
 els.btnClose.addEventListener('click', () => window.close()); // 关闭面板（主进程 closed 事件会清引用，可再次 Ctrl+Shift+D 呼出）
+
+// 皮肤：打开弹层
+els.btnSkin.addEventListener('click', () => { els.skinModal.hidden = false; }); // 显示弹层
+els.skinCancel.addEventListener('click', () => { els.skinModal.hidden = true; }); // 关闭弹层
+els.skinPick.addEventListener('click', async () => { // 选择图片应用（实时注入主窗口）
+  const result = await window.dshDesktop.setSkin(); // 主进程弹图片选择器并注入
+  if (result && result.error) { alert('设置失败：' + result.error); return; } // 失败提示
+  if (result && result.ok) { /* 成功：不弹窗打扰，用户直接看主窗口效果；弹层保持打开以便调透明度 */ }
+});
+els.skinReset.addEventListener('click', async () => { // 恢复默认（实时移除）
+  await window.dshDesktop.clearSkin(); // 移除注入
+  els.skinOpacitySlider.value = 100; // 滑块复位
+  els.skinOpacityVal.textContent = '100%'; // 数值复位
+});
+// 透明度滑块：拖动实时生效
+els.skinOpacitySlider.addEventListener('input', async () => {
+  const v = Number(els.skinOpacitySlider.value); // 当前值
+  els.skinOpacityVal.textContent = v + '%'; // 数值显示
+  await window.dshDesktop.setSkinOpacity(v); // 实时重注入（主窗口立即变化）
+});
 
 // 技能添加：打开弹层（手动安装 / 自动搜索导入）
 els.skillAdd.addEventListener('click', () => { // 打开弹层

@@ -18,7 +18,9 @@ const store = new Store({
     dshHome: process.env.DSH_HOME || DEFAULT_DSH_HOME, // dsh 数据目录
     stopOnQuit: true, // 托盘退出时是否停止"自己托管"的服务
     deepLink: 'off', // 深链模式：off=始终打开目录；预留 auto 供日后切换
-    guideSeenVersion: '' // 已看过使用说明引导的版本号（与当前版本不同则启动时显示引导页）
+    guideSeenVersion: '', // 已看过使用说明引导的版本号（与当前版本不同则启动时显示引导页）
+    skinImage: '', // 皮肤背景图片路径（空 = 默认背景；设置后注入 dsh 工作台）
+    skinOpacity: 100 // 皮肤背景透明度（0~100，默认 100 完全不透明）
   }
 });
 

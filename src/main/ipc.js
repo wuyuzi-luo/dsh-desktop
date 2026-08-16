@@ -11,6 +11,7 @@ import { loadWorkspaces, openWorkspace } from './workspace.js'; // 工作区
 import { listSkills, toggleSkill, installSkill, readSkillContent, listImportableSkills, adoptSkill } from './skill-manager.js'; // 技能
 import { listMcps, addMcp, removeMcp, toggleMcp, listImportableMcps, adoptMcp } from './mcp-manager.js'; // MCP
 import { getConfig, setConfig, isValidDshDir, setDshDir } from './config.js'; // 配置读取/写入与 dsh 目录校验
+import { applySkin, clearSkin, isValidSkinImage } from './skin.js'; // 皮肤背景注入
 
 const execP = promisify(exec); // Promise 化 exec（Node 版本检测用）
 let installing = false; // 自动安装防重入标志（模块级）
@@ -139,6 +140,38 @@ export function registerIpc(deps) {
     if (!/^https?:\/\//i.test(target)) return false; // 只放行网页链接
     await shell.openExternal(target); // 打开默认浏览器
     return true;
+  });
+
+  // 设置皮肤：弹图片选择器 → 校验 → 存配置 → 立即注入主窗口
+  ipcMain.handle(IPC.SKIN_SET, async () => {
+    const win = getMainWindow(); // 父窗口
+    const result = await dialog.showOpenDialog(win, { // 图片选择对话框
+      title: '选择皮肤背景图片', // 标题
+      buttonLabel: '应用这张图', // 确认按钮
+      properties: ['openFile'], // 只选文件
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] // 图片过滤
+    });
+    if (result.canceled || !result.filePaths.length) return { canceled: true }; // 用户取消
+    const imagePath = result.filePaths[0]; // 所选图片
+    if (!isValidSkinImage(imagePath)) return { error: '图片格式不支持' }; // 校验失败
+    setConfig('skinImage', imagePath); // 持久化皮肤路径
+    await applySkin(win); // 立即应用（注入 dsh 工作台）
+    return { ok: true, path: imagePath }; // 回报
+  });
+
+  // 恢复默认背景
+  ipcMain.handle(IPC.SKIN_CLEAR, () => {
+    setConfig('skinImage', ''); // 清空皮肤配置
+    clearSkin(getMainWindow()); // 移除注入
+    return { ok: true };
+  });
+
+  // 调节皮肤透明度（0~100）：存配置并实时重注入
+  ipcMain.handle(IPC.SKIN_OPACITY, async (_e, value) => {
+    const v = Math.min(100, Math.max(0, Number(value) || 100)); // 夹取 0~100
+    setConfig('skinOpacity', v); // 持久化
+    await applySkin(getMainWindow()); // 实时重注入（移除旧 CSS 后按新透明度注入）
+    return { ok: true, opacity: v };
   });
 
   // —— Skills ——
