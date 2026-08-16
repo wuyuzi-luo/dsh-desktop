@@ -15,6 +15,17 @@ const els = {
   btnUpdate: document.getElementById('btnUpdate'), // 检查更新
   btnGuide: document.getElementById('btnGuide'), // 使用说明
   btnClose: document.getElementById('btnClose'), // 关闭面板
+  btnDshUpdate: document.getElementById('btnDshUpdate'), // 更新 dsh 本体
+  skillModal: document.getElementById('skillModal'), // Skill 添加弹层
+  skillModeManual: document.getElementById('skillModeManual'), // 手动安装模式
+  skillModeImport: document.getElementById('skillModeImport'), // 自动搜索导入模式
+  skillManualFields: document.getElementById('skillManualFields'), // 手动安装区
+  skillImportFields: document.getElementById('skillImportFields'), // 搜索导入区
+  skillPick: document.getElementById('skillPick'), // 选择文件夹/zip
+  skillImportList: document.getElementById('skillImportList'), // 可导入列表
+  skillImportEmpty: document.getElementById('skillImportEmpty'), // 空提示
+  skillImportFilter: document.getElementById('skillImportFilter'), // 筛选输入框
+  skillModalCancel: document.getElementById('skillModalCancel'), // 关闭弹层
   skillAdd: document.getElementById('skillAdd'), // 添加技能
   mcpAdd: document.getElementById('mcpAdd'), // 添加 MCP
   mcpModal: document.getElementById('mcpModal') // MCP 表单弹层
@@ -154,14 +165,28 @@ async function refreshAll() {
   renderUpdater(); // 更新状态
 }
 
-// 渲染更新状态到按钮文案
+// 渲染更新状态（APP 按钮 + dsh 本体按钮）
 function renderUpdater() {
-  const u = snapshot?.updater ?? {}; // 更新状态
-  const map = { // 文案表
-    available: '⬇ 发现新版本', downloading: `⬇ 下载中 ${u.info?.percent ?? ''}%`,
-    downloaded: '✓ 已下载（退出时安装）', up_to_date: undefined, 'up-to-date': '✓ 已是最新', error: '检查更新'
+  const u = snapshot?.updater?.app ?? {}; // APP 更新状态
+  const d = snapshot?.updater?.dsh ?? {}; // dsh 本体更新状态
+  const map = { // APP 文案表
+    checking: '⏳ 检查中…',
+    available: `⬇ 更新到 v${u.info?.version ?? ''}`, // 有新版：点击即确认下载
+    downloading: `⬇ 下载中 ${u.info?.percent ?? ''}%`,
+    downloaded: '✓ 已下载（点通知安装）',
+    'up-to-date': '✓ 已是最新',
+    error: '↻ 检查更新'
   };
   els.btnUpdate.textContent = map[u.status] ?? '↻ 检查更新'; // 按钮文案
+  if (d.status === 'available') { // dsh 有新版：显示更新按钮
+    els.btnDshUpdate.hidden = false; // 显示
+    els.btnDshUpdate.textContent = `⬆ dsh v${d.current} → v${d.latest}`; // 版本对比文案
+  } else if (d.status === 'updating') { // 更新中
+    els.btnDshUpdate.hidden = false; // 显示
+    els.btnDshUpdate.textContent = '⏳ dsh 更新中…'; // 进度文案
+  } else {
+    els.btnDshUpdate.hidden = true; // 其余状态隐藏（保持底部行简洁）
+  }
 }
 
 // Tab 切换
@@ -181,21 +206,94 @@ els.btnRestart.addEventListener('click', async () => { // 重启服务
   await window.dshDesktop.restartService(); // 调主进程
   setTimeout(refreshAll, 2500); // 稍后刷新状态
 });
-els.btnUpdate.addEventListener('click', async () => { // 检查更新
-  els.btnUpdate.textContent = '⏳ 检查中…'; // 反馈
-  await window.dshDesktop.checkUpdate(); // 检查
+els.btnUpdate.addEventListener('click', async () => { // 检查/确认更新
+  const u = snapshot?.updater?.app ?? {}; // 当前 APP 更新状态
+  if (u.status === 'available') { // 有新版 → 用户确认下载
+    els.btnUpdate.textContent = '⏳ 下载中…'; // 反馈
+    await window.dshDesktop.downloadUpdate(); // 下载
+  } else { // 否则执行检查（APP + dsh 本体）
+    els.btnUpdate.textContent = '⏳ 检查中…'; // 反馈
+    await window.dshDesktop.checkUpdate(); // 检查
+  }
   setTimeout(refreshAll, 2000); // 稍后刷新
+});
+els.btnDshUpdate.addEventListener('click', async () => { // 确认更新 dsh 本体
+  els.btnDshUpdate.textContent = '⏳ dsh 更新中…'; // 反馈
+  await window.dshDesktop.updateDsh(); // npm 更新 + 重启服务
+  setTimeout(refreshAll, 3000); // 稍后刷新
 });
 els.btnGuide.addEventListener('click', () => window.dshDesktop.openGuide()); // 主窗口打开使用说明
 els.btnClose.addEventListener('click', () => window.close()); // 关闭面板（主进程 closed 事件会清引用，可再次 Ctrl+Shift+D 呼出）
 
-// 技能添加：调主进程弹选择（文件夹或 zip）
-els.skillAdd.addEventListener('click', async () => { // 安装技能
+// 技能添加：打开弹层（手动安装 / 自动搜索导入）
+els.skillAdd.addEventListener('click', () => { // 打开弹层
+  els.skillModal.hidden = false; // 显示
+  setSkillMode('manual'); // 默认手动模式
+});
+
+// 切换弹层模式
+function setSkillMode(mode) {
+  const isManual = mode === 'manual'; // 是否手动
+  els.skillModeManual.className = 'abtn' + (isManual ? ' primary' : ''); // 高亮手动
+  els.skillModeImport.className = 'abtn' + (isManual ? '' : ' primary'); // 高亮导入
+  els.skillManualFields.hidden = !isManual; // 显示/隐藏手动区
+  els.skillImportFields.hidden = isManual; // 显示/隐藏导入区
+  if (!isManual) renderSkillImportList(); // 切入导入模式时加载列表
+}
+els.skillModeManual.addEventListener('click', () => setSkillMode('manual')); // 手动模式
+els.skillModeImport.addEventListener('click', () => setSkillMode('import')); // 导入模式
+els.skillModalCancel.addEventListener('click', () => { els.skillModal.hidden = true; }); // 关闭弹层
+
+// 可导入技能缓存（筛选用）
+let importableSkills = []; // 全量扫描结果
+
+// 渲染可自动搜索导入的技能列表（每项带"导入"按钮，支持名称筛选）
+function renderSkillImportListFromCache() {
+  const kw = (els.skillImportFilter.value || '').trim().toLowerCase(); // 筛选关键词
+  const items = kw ? importableSkills.filter((s) => String(s.name).toLowerCase().includes(kw)) : importableSkills; // 过滤
+  els.skillImportEmpty.hidden = items.length > 0; // 空提示显隐
+  els.skillImportList.innerHTML = items.map((s) => ` // 逐条渲染
+    <div class="row" data-skilldir="${escapeHtml(s.dir)}">
+      <div class="info">
+        <div class="name">${escapeHtml(s.name)}</div>
+        <div class="desc">${escapeHtml(s.source)}</div>
+      </div>
+      <button class="abtn" data-import>导入</button>
+    </div>
+  `).join('');
+  els.skillImportList.querySelectorAll('[data-import]').forEach((btn) => { // 绑定导入
+    btn.addEventListener('click', async () => { // 点击导入
+      const dir = btn.closest('.row').dataset.skilldir; // 目录（HTML 转义后取回）
+      btn.textContent = '导入中…'; // 反馈
+      try { // 调主进程复制
+        await window.dshDesktop.adoptSkill({ dir }); // 导入
+        importableSkills = importableSkills.filter((s) => s.dir !== dir); // 从缓存移除
+        renderSkillImportListFromCache(); // 重渲染
+        refreshAll(); // 刷新技能列表
+      } catch (err) { // 失败
+        btn.textContent = '导入'; // 恢复
+        alert('导入失败：' + (err?.message ?? err)); // 提示
+      }
+    });
+  });
+}
+
+// 加载可导入技能并渲染
+async function renderSkillImportList() {
+  els.skillImportList.innerHTML = '<div class="empty">搜索中…</div>'; // 加载态
+  importableSkills = (await window.dshDesktop.importSkillsList()) ?? []; // 扫描
+  renderSkillImportListFromCache(); // 渲染
+}
+els.skillImportFilter.addEventListener('input', renderSkillImportListFromCache); // 输入即筛选
+
+// 手动安装：调主进程弹选择（文件夹或 zip）
+els.skillPick.addEventListener('click', async () => { // 选择安装
   const result = await window.dshDesktop.installSkill(); // 主进程弹框并安装
   if (result && result.error) { // 安装失败（如 zip 内无 SKILL.md）
     alert('安装失败：' + result.error); // 展示错误
     return;
   }
+  els.skillModal.hidden = true; // 成功关闭弹层
   refreshAll(); // 刷新列表
 });
 

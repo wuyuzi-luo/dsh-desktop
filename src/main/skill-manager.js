@@ -158,6 +158,53 @@ async function copyDir(src, dest) {
   }
 }
 
+// 递归搜索目录树下所有含 SKILL.md 的目录（自动搜索导入用；命中技能根后不再深入）
+async function walkSkillDirs(root, depth, out) {
+  if (depth < 0 || !existsSync(root)) return; // 深度耗尽或目录不存在
+  if (existsSync(join(root, 'SKILL.md'))) { out.push(root); return; } // 命中技能根，收集后不再往下
+  let entries = []; // 子项
+  try { entries = await readdir(root, { withFileTypes: true }); } catch { return; } // 读失败跳过
+  for (const e of entries) { // 逐子目录
+    if (!e.isDirectory() || e.name.startsWith('.')) continue; // 只进普通目录
+    await walkSkillDirs(join(root, e.name), depth - 1, out); // 递归
+  }
+}
+
+// 列出可自动搜索导入的技能：Claude 插件市场缓存里、且未出现在任何扫描根中的技能
+export async function listImportableSkills() {
+  const pluginsDir = join(homedir(), '.claude', 'plugins', 'cache'); // 插件缓存根
+  const dirs = []; // 命中的技能目录
+  await walkSkillDirs(pluginsDir, 8, dirs); // 递归收集（8 层足够覆盖市场/插件/版本/目录结构）
+  const rootNames = new Set(); // 已存在于扫描根的技能目录名（去重依据）
+  for (const r of getSkillRoots()) { // 逐根收集
+    if (!existsSync(r.path)) continue; // 不存在跳过
+    for (const e of await readdir(r.path)) { // 列条目
+      if (!e.startsWith('.')) rootNames.add(e); // 记名
+    }
+  }
+  const out = []; // 结果
+  const seenNames = new Set(); // 名称去重（不同市场同名技能只留第一个）
+  for (const dir of dirs) { // 逐命中目录
+    const name = basename(dir); // 目录名
+    if (rootNames.has(name) || seenNames.has(name)) continue; // 已存在/已收录 → 跳过
+    const meta = await readSkillMeta(dir).catch(() => null); // 解析元信息
+    if (!meta) continue; // 无元信息跳过
+    seenNames.add(name); // 记名去重
+    out.push({ name: meta.name, dir, source: 'Claude 插件市场' }); // 组装摘要
+  }
+  return out; // 返回
+}
+
+// 导入已有技能：把外部目录复制进 $DSH_HOME/skills（dsh 扫描根）
+export async function adoptSkill(external) {
+  if (!external?.dir || !existsSync(external.dir)) throw new Error('技能目录不存在'); // 校验
+  const name = basename(external.dir); // 目标名
+  const target = join(getSkillsDir(), name); // 安装落点
+  if (existsSync(target)) throw new Error(`技能 ${name} 已存在`); // 防覆盖
+  await mkdir(getSkillsDir(), { recursive: true }); // 确保根目录
+  await copyDir(external.dir, target); // 复制
+}
+
 // 切换启用/停用（移动文件夹进/出扫描根，chokidar 热生效）
 export async function toggleSkill(id, enabled) {
   const all = await listSkills(); // 找目标

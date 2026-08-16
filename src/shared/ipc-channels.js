@@ -29,6 +29,10 @@ export const IPC = {
   SKILL_TOGGLE: 'skills:toggle',
   // 安装 Skill（选目录或压缩包）
   SKILL_INSTALL: 'skills:install',
+  // 扫描可自动导入的 Skill（Claude 插件市场缓存）
+  SKILLS_IMPORT: 'skills:import',
+  // 导入搜索到的 Skill（复制进 dsh 扫描根）
+  SKILLS_ADOPT: 'skills:adopt',
   // MCP 列表拉取
   MCP_LIST: 'mcp:list',
   // MCP 开关切换
@@ -41,8 +45,12 @@ export const IPC = {
   MCP_IMPORT: 'mcp:import',
   // 收编外部 MCP
   MCP_ADOPT: 'mcp:adopt',
-  // 手动检查更新
+  // 手动检查更新（APP 与 dsh 本体一起查）
   UPDATER_CHECK: 'updater:check',
+  // 用户确认下载 APP 更新
+  UPDATER_DOWNLOAD: 'updater:download',
+  // 用户确认更新 dsh 本体
+  UPDATER_DSH_UPDATE: 'updater:dsh-update',
   // 更新状态推送（发现新版/下载中/已是最新）
   UPDATER_STATE: 'updater:state'
 };

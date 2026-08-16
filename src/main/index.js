@@ -138,9 +138,15 @@ if (!gotLock) {
     // 6. MCP 同步（把应用配置里的启用项写进 cordis.patch.yml）
     await initMcpManager(); // 同步一次
 
-    // 7. 更新器（启动静默检查）
-    updater = createUpdater(); // 建更新器
-    if (app.isPackaged) updater.silentCheck(); // 打包版才静默检查（dev 模式跳过避免噪音）
+    // 7. 更新器（启动自动检查 APP 与 dsh 本体；发现新版仅提示，用户确认后才下载/安装）
+    updater = createUpdater({ // 建更新器（注入回调）
+      openPanel, // 通知点击 → 打开控制面板
+      restartService: () => supervisor?.restart() // dsh 本体更新完成后重启服务
+    });
+    if (app.isPackaged) { // 打包版才自动检查（dev 模式跳过避免噪音）
+      updater.silentCheck(); // APP 更新检查
+      updater.silentDshCheck(); // dsh 本体更新检查
+    }
   });
 
   // 全部窗口关闭：不退出（关窗 = 隐藏到托盘；托盘"退出"才真退出）

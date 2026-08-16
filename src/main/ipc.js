@@ -8,7 +8,7 @@ import { mkdirSync, existsSync } from 'node:fs'; // 建安装目录 / 判断盘�
 import { IPC } from '../shared/ipc-channels.js'; // 通道名常量
 import { getMainWindow, pushBootState, loadGuide, loadWebUi } from './window.js'; // 主窗口操作与 boot 页状态推送
 import { loadWorkspaces, openWorkspace } from './workspace.js'; // 工作区
-import { listSkills, toggleSkill, installSkill, readSkillContent } from './skill-manager.js'; // 技能
+import { listSkills, toggleSkill, installSkill, readSkillContent, listImportableSkills, adoptSkill } from './skill-manager.js'; // 技能
 import { listMcps, addMcp, removeMcp, toggleMcp, listImportableMcps, adoptMcp } from './mcp-manager.js'; // MCP
 import { getConfig, setConfig, isValidDshDir, setDshDir } from './config.js'; // 配置读取/写入与 dsh 目录校验
 
@@ -138,6 +138,11 @@ export function registerIpc(deps) {
     }
   });
   ipcMain.handle('skills:content', async (_e, id) => readSkillContent(id)); // 展开正文（临时通道）
+  ipcMain.handle(IPC.SKILLS_IMPORT, () => listImportableSkills()); // 扫描可自动导入的技能
+  ipcMain.handle(IPC.SKILLS_ADOPT, async (_e, external) => { // 导入搜索到的技能
+    await adoptSkill(external); // 复制进扫描根
+    return listSkills(); // 返回最新列表
+  });
 
   // —— MCP ——
   ipcMain.handle(IPC.MCP_LIST, () => listMcps()); // 列表
@@ -160,9 +165,19 @@ export function registerIpc(deps) {
   });
 
   // —— 更新 ——
-  ipcMain.handle(IPC.UPDATER_CHECK, async () => { // 手动检查
+  ipcMain.handle(IPC.UPDATER_CHECK, async () => { // 手动检查（APP 与 dsh 本体一起查）
     const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用（注册早于创建）
-    return updater ? updater.manualCheck() : { status: 'idle' }; // 检查并返回
+    if (!updater) return { status: 'idle' }; // 无更新器
+    await Promise.all([updater.manualCheck(), updater.manualDshCheck()]); // 并行检查两者
+    return updater.getState(); // 返回完整快照
+  });
+  ipcMain.handle(IPC.UPDATER_DOWNLOAD, async () => { // 用户确认下载 APP 更新
+    const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用
+    return updater ? updater.download() : { status: 'idle' }; // 下载并返回
+  });
+  ipcMain.handle(IPC.UPDATER_DSH_UPDATE, async () => { // 用户确认更新 dsh 本体
+    const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用
+    return updater ? updater.updateDsh() : { status: 'idle' }; // 更新并返回
   });
 }
 

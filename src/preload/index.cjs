@@ -19,13 +19,17 @@ const IPC = {
   SKILLS_LIST: 'skills:list', // 技能列表
   SKILL_TOGGLE: 'skills:toggle', // 技能开关
   SKILL_INSTALL: 'skills:install', // 安装技能
+  SKILLS_IMPORT: 'skills:import', // 扫描可导入技能
+  SKILLS_ADOPT: 'skills:adopt', // 导入技能
   MCP_LIST: 'mcp:list', // MCP 列表
   MCP_TOGGLE: 'mcp:toggle', // MCP 开关
   MCP_ADD: 'mcp:add', // 添加 MCP
   MCP_REMOVE: 'mcp:remove', // 删除 MCP
   MCP_IMPORT: 'mcp:import', // 扫描可导入外部 MCP
   MCP_ADOPT: 'mcp:adopt', // 收编外部 MCP
-  UPDATER_CHECK: 'updater:check' // 检查更新
+  UPDATER_CHECK: 'updater:check', // 检查更新
+  UPDATER_DOWNLOAD: 'updater:download', // 确认下载 APP 更新
+  UPDATER_DSH_UPDATE: 'updater:dsh-update' // 确认更新 dsh
 };
 
 // 暴露给页面的 dshDesktop API（面板与 boot 页共用）
@@ -60,6 +64,8 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   listSkills: () => ipcRenderer.invoke(IPC.SKILLS_LIST), // 列表
   toggleSkill: (id, enabled) => ipcRenderer.invoke(IPC.SKILL_TOGGLE, { id, enabled }), // 开关
   installSkill: () => ipcRenderer.invoke(IPC.SKILL_INSTALL), // 安装
+  importSkillsList: () => ipcRenderer.invoke(IPC.SKILLS_IMPORT), // 可导入列表
+  adoptSkill: (external) => ipcRenderer.invoke(IPC.SKILLS_ADOPT, external), // 导入
   skillContent: (id) => ipcRenderer.invoke('skills:content', id), // 正文
   // —— MCP ——
   listMcps: () => ipcRenderer.invoke(IPC.MCP_LIST), // 列表
@@ -69,5 +75,7 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   listImportableMcps: () => ipcRenderer.invoke(IPC.MCP_IMPORT), // 可导入列表
   adoptMcp: (external) => ipcRenderer.invoke(IPC.MCP_ADOPT, external), // 收编
   // —— 更新 ——
-  checkUpdate: () => ipcRenderer.invoke(IPC.UPDATER_CHECK) // 检查
+  checkUpdate: () => ipcRenderer.invoke(IPC.UPDATER_CHECK), // 检查（APP + dsh）
+  downloadUpdate: () => ipcRenderer.invoke(IPC.UPDATER_DOWNLOAD), // 确认下载 APP 更新
+  updateDsh: () => ipcRenderer.invoke(IPC.UPDATER_DSH_UPDATE) // 确认更新 dsh
 });

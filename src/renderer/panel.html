@@ -37,7 +37,7 @@
   <!-- Skills Tab -->
   <section class="pane" id="pane-skills">
     <div class="list" id="skillList"></div>
-    <button class="addbtn" id="skillAdd">＋ 添加 Skill（文件夹/zip）</button>
+    <button class="addbtn" id="skillAdd">＋ 添加 Skill</button>
   </section>
 
   <!-- MCP Tab -->
@@ -51,6 +51,7 @@
     <button class="abtn" id="btnOpen">◧ 打开工作台</button>
     <button class="abtn" id="btnRestart">↻ 重启服务</button>
     <button class="abtn" id="btnUpdate">↻ 检查更新</button>
+    <button class="abtn" id="btnDshUpdate" hidden>⬆ dsh</button>
     <button class="abtn" id="btnGuide">? 使用说明</button>
   </footer>
 
@@ -95,6 +96,32 @@
       <div class="modal-actions">
         <button class="abtn" id="mcpCancel">取消</button>
         <button class="abtn primary" id="mcpSave" hidden>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skill 添加弹层（手动安装 / 自动搜索导入 两种模式） -->
+  <div class="modal" id="skillModal" hidden>
+    <div class="modal-body">
+      <h3>添加 Skill</h3>
+      <div class="mode-switch">
+        <button class="abtn primary" id="skillModeManual">手动安装</button>
+        <button class="abtn" id="skillModeImport">自动搜索导入</button>
+      </div>
+      <!-- 手动安装：调主进程弹文件夹/zip 选择器 -->
+      <div id="skillManualFields">
+        <p class="hint">选择本地的技能文件夹或 zip 压缩包，将复制到 dsh 技能目录。</p>
+        <button class="abtn primary" id="skillPick">选择文件夹 / zip</button>
+      </div>
+      <!-- 自动搜索导入：列出插件市场缓存中发现的技能 -->
+      <div id="skillImportFields" hidden>
+        <p class="hint">自动搜索本机插件缓存中的技能（未在 dsh 扫描根内的）：</p>
+        <input id="skillImportFilter" placeholder="🔍 按名称筛选…" style="margin-bottom:8px" />
+        <div class="list" id="skillImportList" style="max-height:220px;overflow-y:auto"></div>
+        <div class="empty" id="skillImportEmpty" hidden>没有发现可导入的技能</div>
+      </div>
+      <div class="modal-actions">
+        <button class="abtn" id="skillModalCancel">关闭</button>
       </div>
     </div>
   </div>
