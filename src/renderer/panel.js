@@ -13,17 +13,14 @@ const els = {
   btnOpen: document.getElementById('btnOpen'), // 打开工作台
   btnRestart: document.getElementById('btnRestart'), // 重启服务
   btnUpdate: document.getElementById('btnUpdate'), // 检查更新
-  btnGuide: document.getElementById('btnGuide'), // 使用说明
   btnClose: document.getElementById('btnClose'), // 关闭面板
   btnDshUpdate: document.getElementById('btnDshUpdate'), // 更新 dsh 本体
   skillModal: document.getElementById('skillModal'), // Skill 添加弹层
-  btnSkin: document.getElementById('btnSkin'), // 皮肤按钮
-  skinModal: document.getElementById('skinModal'), // 皮肤弹层
   skinPick: document.getElementById('skinPick'), // 选择图片应用
   skinReset: document.getElementById('skinReset'), // 恢复默认
-  skinCancel: document.getElementById('skinCancel'), // 关闭弹层
   skinOpacitySlider: document.getElementById('skinOpacitySlider'), // 透明度滑块
   skinOpacityVal: document.getElementById('skinOpacityVal'), // 透明度数值
+  btnOpenGuide: document.getElementById('btnOpenGuide'), // 打开完整使用说明
   skillModeManual: document.getElementById('skillModeManual'), // 手动安装模式
   skillModeImport: document.getElementById('skillModeImport'), // 自动搜索导入模式
   skillManualFields: document.getElementById('skillManualFields'), // 手动安装区
@@ -196,12 +193,12 @@ function renderUpdater() {
   }
 }
 
-// Tab 切换
-document.querySelectorAll('.tab').forEach((tab) => { // 绑定页签
+// 左侧导航切换
+document.querySelectorAll('.navitem').forEach((tab) => { // 绑定导航项
   tab.addEventListener('click', () => { // 点击切换
-    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active')); // 清激活
+    document.querySelectorAll('.navitem').forEach((t) => t.classList.remove('active')); // 清激活
     document.querySelectorAll('.pane').forEach((p) => p.classList.remove('active')); // 清面板
-    tab.classList.add('active'); // 激活页签
+    tab.classList.add('active'); // 激活导航项
     document.getElementById('pane-' + tab.dataset.tab).classList.add('active'); // 激活面板
   });
 });
@@ -229,16 +226,14 @@ els.btnDshUpdate.addEventListener('click', async () => { // 确认更新 dsh 本
   await window.dshDesktop.updateDsh(); // npm 更新 + 重启服务
   setTimeout(refreshAll, 3000); // 稍后刷新
 });
-els.btnGuide.addEventListener('click', () => window.dshDesktop.openGuide()); // 主窗口打开使用说明
+els.btnOpenGuide.addEventListener('click', () => window.dshDesktop.openGuide()); // 主窗口打开完整使用说明
 els.btnClose.addEventListener('click', () => window.close()); // 关闭面板（主进程 closed 事件会清引用，可再次 Ctrl+Shift+D 呼出）
 
-// 皮肤：打开弹层
-els.btnSkin.addEventListener('click', () => { els.skinModal.hidden = false; }); // 显示弹层
-els.skinCancel.addEventListener('click', () => { els.skinModal.hidden = true; }); // 关闭弹层
-els.skinPick.addEventListener('click', async () => { // 选择图片应用（实时注入主窗口）
+// 皮肤 Tab：选择图片应用（实时注入主窗口）
+els.skinPick.addEventListener('click', async () => {
   const result = await window.dshDesktop.setSkin(); // 主进程弹图片选择器并注入
   if (result && result.error) { alert('设置失败：' + result.error); return; } // 失败提示
-  if (result && result.ok) { /* 成功：不弹窗打扰，用户直接看主窗口效果；弹层保持打开以便调透明度 */ }
+  if (result && result.ok) { /* 成功：不弹窗打扰，用户直接看主窗口效果 */ }
 });
 els.skinReset.addEventListener('click', async () => { // 恢复默认（实时移除）
   await window.dshDesktop.clearSkin(); // 移除注入

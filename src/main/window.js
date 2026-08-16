@@ -72,8 +72,8 @@ export function createPanelWindow(getStateSnapshot, handle) {
     return panelWindow; // 返回
   }
   panelWindow = new BrowserWindow({ // 新建面板
-    width: 400, // 宽
-    height: 560, // 高
+    width: 640, // 宽（左侧导航 + 右侧内容双栏布局）
+    height: 600, // 高
     show: false, // 先隐藏
     frame: false, // 无边框（自绘标题区）
     resizable: true, // 可调大小

@@ -1,18 +1,22 @@
 // 皮肤模块：把用户自定义图片注入 dsh 工作台背景
-// 方案：图片转 base64 data URL 内嵌 CSS，经 webContents.insertCSS 注入
-// （dsh 页面无 CSP 限制已验证；insertCSS 返回 key，可精确移除）
+// 注入方式：executeJavaScript 插入 <style id="dsh-skin-style"> 标签（清除时删除该元素，100% 可控）
+// 大图自动压缩：nativeImage 读入 → 最长边缩到 2560 → 转 JPEG(85) → base64 data URL
 
 import { readFile } from 'node:fs/promises'; // 读图片文件
 import { existsSync } from 'node:fs'; // 存在性检查
+import { nativeImage } from 'electron'; // 图片解码/缩放/编码（Electron 内置）
 import { getConfig } from './config.js'; // 配置读取
-import { setConfig } from './config.js'; // 配置写入（透明度设置）
 
 // 支持的图片扩展名
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'];
-// 单张图片大小上限（10MB，防超大图卡死界面）
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-// 每个窗口当前注入的 CSS key（移除注入用）
-const injectedKeys = new Map(); // window id → key
+// 原图文件大小上限（压缩前；游戏 4K 截图可达 30MB+，压缩后仅几百 KB）
+const MAX_RAW_BYTES = 100 * 1024 * 1024;
+// 压缩目标：最长边像素（4K 截图压到 2560 足够作背景）
+const MAX_SIDE_PX = 2560;
+// 压缩质量（JPEG 85 视觉无损，体积小）
+const JPEG_QUALITY = 85;
+// 注入的 style 元素 id（清除时按 id 删除）
+const STYLE_ID = 'dsh-skin-style';
 
 // 校验皮肤图片文件是否可用
 export function isValidSkinImage(path) {
@@ -21,21 +25,31 @@ export function isValidSkinImage(path) {
   return existsSync(path); // 文件存在
 }
 
-// 生成背景注入 CSS（base64 data URL 内嵌到 body::before，透明层支持透明度调节）
-async function buildSkinCss(imagePath) {
+// 读图并压缩转 base64 data URL（大图自动缩放转 JPEG，防超大 CSS 卡死界面）
+async function imageToDataUrl(imagePath) {
   const buf = await readFile(imagePath); // 读文件
-  if (buf.length > MAX_IMAGE_BYTES) throw new Error('图片超过 10MB，请换一张小一点的'); // 大小限制
-  const mime = imagePath.toLowerCase().endsWith('.png') ? 'image/png' // MIME 推断
-    : imagePath.toLowerCase().endsWith('.jpg') || imagePath.toLowerCase().endsWith('.jpeg') ? 'image/jpeg'
-    : imagePath.toLowerCase().endsWith('.webp') ? 'image/webp'
-    : imagePath.toLowerCase().endsWith('.gif') ? 'image/gif'
-    : 'image/bmp';
-  const dataUrl = `data:${mime};base64,${buf.toString('base64')}`; // 内嵌数据
+  if (buf.length > MAX_RAW_BYTES) throw new Error('图片文件过大（超过 100MB）'); // 原图上限
+  let image = nativeImage.createFromPath(imagePath); // Electron 解码
+  if (image.isEmpty()) throw new Error('无法解析该图片文件'); // 解码失败（损坏/格式异常）
+  const { width, height } = image.getSize(); // 原始尺寸
+  const maxSide = Math.max(width, height); // 最长边
+  if (maxSide > MAX_SIDE_PX) { // 超大图等比缩小
+    const ratio = MAX_SIDE_PX / maxSide; // 缩放比
+    image = image.resize({ width: Math.round(width * ratio), height: Math.round(height * ratio), quality: 'good' }); // 缩放
+  }
+  // GIF 保持动图（toPNG 会丢动画；大小本来就可控）
+  const isGif = imagePath.toLowerCase().endsWith('.gif');
+  const data = isGif ? buf : image.toJPEG(JPEG_QUALITY); // GIF 用原文件，其余统一转 JPEG
+  const mime = isGif ? 'image/gif' : 'image/jpeg'; // MIME
+  return `data:${mime};base64,${data.toString('base64')}`; // data URL
+}
+
+// 生成背景注入脚本（style 标签 + body::before 固定层 + 透明度）
+function buildSkinScript(dataUrl) {
   // 皮肤透明度（config 存 0~100，默认 100）
   const raw = Number(getConfig('skinOpacity'));
   const opacity = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) / 100 : 1; // 换算 0~1
-  // 用 body::before 固定层承载背景：z-index -1 置于内容之下、body 背景之上，opacity 只影响背景不影响内容
-  return `body {
+  const css = `body {
   position: relative !important;
 }
 body::before {
@@ -49,27 +63,38 @@ body::before {
   background-repeat: no-repeat !important;
   opacity: ${opacity} !important;
   pointer-events: none !important;
-}`;
+}`; // 背景独立层，透明度只影响背景
+  // 先删旧 style 再插入新的（幂等切换）
+  return `(() => {
+  const old = document.getElementById('${STYLE_ID}');
+  if (old) old.remove();
+  const style = document.createElement('style');
+  style.id = '${STYLE_ID}';
+  style.textContent = ${JSON.stringify(css)};
+  document.head.appendChild(style);
+})()`;
 }
 
-// 给主窗口注入当前皮肤（页面每次加载后需重新注入）
+// 给主窗口注入当前皮肤（页面每次加载后需重新注入；重复调用幂等）
 export async function applySkin(win) {
   if (!win || win.isDestroyed()) return; // 窗口无效
   const imagePath = getConfig('skinImage'); // 当前皮肤路径
-  // 先移除旧注入（同一窗口重复调用时防叠加）
-  const oldKey = injectedKeys.get(win.id); // 旧 key
-  if (oldKey) { try { win.webContents.removeInsertedCSS(oldKey); } catch { /* 已失效忽略 */ } injectedKeys.delete(win.id); }
-  if (!isValidSkinImage(imagePath)) return; // 无皮肤或文件失效 → 保持默认
+  if (!isValidSkinImage(imagePath)) { // 无皮肤或文件失效 → 清掉残留注入
+    await clearSkin(win); // 确保干净
+    return;
+  }
   try {
-    const css = await buildSkinCss(imagePath); // 构建 CSS
-    const key = await win.webContents.insertCSS(css, { cssOrigin: 'author' }); // 注入（author 层配合 !important）
-    injectedKeys.set(win.id, key); // 记录 key
-  } catch { /* 注入失败静默（图片损坏等） */ }
+    const dataUrl = await imageToDataUrl(imagePath); // 读图压缩转 base64
+    await win.webContents.executeJavaScript(buildSkinScript(dataUrl), true); // 注入 style 标签
+  } catch (err) {
+    throw new Error(`应用皮肤失败：${err?.message ?? err}`); // 把错误抛给 IPC（面板提示）
+  }
 }
 
-// 清除当前窗口的皮肤注入
-export function clearSkin(win) {
+// 清除当前窗口的皮肤注入（删除 style 标签，立即生效）
+export async function clearSkin(win) {
   if (!win || win.isDestroyed()) return; // 窗口无效
-  const key = injectedKeys.get(win.id); // 已注入的 key
-  if (key) { try { win.webContents.removeInsertedCSS(key); } catch { /* 已失效忽略 */ } injectedKeys.delete(win.id); } // 移除
+  try {
+    await win.webContents.executeJavaScript(`document.getElementById('${STYLE_ID}')?.remove();`, true); // 删除注入标签
+  } catch { /* 页面未加载等异常忽略 */ }
 }

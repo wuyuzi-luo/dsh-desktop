@@ -7,54 +7,100 @@
   <link rel="stylesheet" href="panel.css" />
 </head>
 <body>
-  <!-- 无边框窗口：自绘标题栏（可拖拽） -->
-  <header class="titlebar">
-    <span class="dot"></span>
-    <span class="title">dsh 控制面板</span>
-    <span class="ver" id="ver">v-</span>
-    <button class="closebtn" id="btnClose" title="关闭面板">✕</button>
-  </header>
+  <div class="app">
+    <!-- 左侧导航栏（dsh 设置页风格：双栏布局） -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="dot"></span>
+        <span class="title">dsh 控制面板</span>
+        <button class="iconbtn" id="btnClose" title="关闭面板">✕</button>
+      </div>
+      <nav class="nav">
+        <button class="navitem active" data-tab="ws">🗂 工作区</button>
+        <button class="navitem" data-tab="skills">🧩 Skills</button>
+        <button class="navitem" data-tab="mcp">🔌 MCP</button>
+        <button class="navitem" data-tab="skin">🎨 皮肤</button>
+        <button class="navitem" data-tab="guide">❓ 使用说明</button>
+      </nav>
+      <div class="side-ver" id="ver">v-</div>
+    </aside>
 
-  <!-- 状态行：服务状态点 + 地址 + 更新状态 -->
-  <div class="statusbar">
-    <span class="status-dot" id="svcDot"></span>
-    <span class="status-text" id="svcText">检查中…</span>
-    <span class="addr" id="svcUrl"></span>
+    <!-- 右侧内容区 -->
+    <main class="content">
+      <!-- 状态行：服务状态点 + 地址 -->
+      <header class="statusbar">
+        <span class="status-dot" id="svcDot"></span>
+        <span class="status-text" id="svcText">检查中…</span>
+        <span class="addr" id="svcUrl"></span>
+      </header>
+
+      <!-- 工作区 Tab -->
+      <section class="pane active" id="pane-ws">
+        <div class="list" id="wsList"></div>
+      </section>
+
+      <!-- Skills Tab -->
+      <section class="pane" id="pane-skills">
+        <div class="list" id="skillList"></div>
+        <button class="addbtn" id="skillAdd">＋ 添加 Skill</button>
+      </section>
+
+      <!-- MCP Tab -->
+      <section class="pane" id="pane-mcp">
+        <div class="list" id="mcpList"></div>
+        <button class="addbtn" id="mcpAdd">＋ 添加 MCP</button>
+      </section>
+
+      <!-- 皮肤 Tab：选图 / 透明度 / 恢复默认（平铺设置项） -->
+      <section class="pane" id="pane-skin">
+        <div class="setting-group">
+          <div class="setting-title">背景图片</div>
+          <div class="setting-desc">把本地图片设置为 dsh 工作台的背景（png / jpg / webp / gif，大图自动压缩）。切换与透明度调节实时生效。</div>
+          <div class="setting-row">
+            <button class="abtn primary" id="skinPick">🎨 选择图片应用</button>
+            <button class="abtn" id="skinReset">↺ 恢复默认背景</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-title">背景透明度</div>
+          <div class="setting-desc">拖动滑块实时调节，只影响背景不影响界面文字。</div>
+          <div class="setting-row">
+            <input type="range" id="skinOpacitySlider" min="10" max="100" value="100" style="flex:1" />
+            <span class="opacity-val" id="skinOpacityVal">100%</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 使用说明 Tab：内嵌简版说明 + 打开完整引导页 -->
+      <section class="pane" id="pane-guide">
+        <div class="setting-group">
+          <div class="setting-title">快速上手</div>
+          <div class="setting-desc">
+            · 关闭窗口 = 最小化到托盘，右键鲸鱼图标退出<br>
+            · 托盘图标：蓝色 = 运行中，红色 = 服务异常<br>
+            · 服务异常时：完全退出应用后重新进入一次<br>
+            · 检测不到 dsh 时，按引导安装或选择已安装目录
+          </div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-title">数据安全</div>
+          <div class="setting-desc">
+            · API Key 与聊天记录只保存在本机数据目录（默认 D:\deepseek-harness\home）<br>
+            · 请勿向他人分享数据目录或 API Key
+          </div>
+        </div>
+        <button class="abtn" id="btnOpenGuide">📖 打开完整使用说明</button>
+      </section>
+
+      <!-- 底部按键行 -->
+      <footer class="actions">
+        <button class="abtn primary" id="btnOpen">◧ 打开工作台</button>
+        <button class="abtn" id="btnRestart">↻ 重启服务</button>
+        <button class="abtn" id="btnUpdate">↻ 检查更新</button>
+        <button class="abtn" id="btnDshUpdate" hidden>⬆ dsh</button>
+      </footer>
+    </main>
   </div>
-
-  <!-- Tab 页签（dsh web 风格） -->
-  <nav class="tabs">
-    <button class="tab active" data-tab="ws">工作区</button>
-    <button class="tab" data-tab="skills">Skills</button>
-    <button class="tab" data-tab="mcp">MCP</button>
-  </nav>
-
-  <!-- 工作区 Tab -->
-  <section class="pane active" id="pane-ws">
-    <div class="list" id="wsList"></div>
-  </section>
-
-  <!-- Skills Tab -->
-  <section class="pane" id="pane-skills">
-    <div class="list" id="skillList"></div>
-    <button class="addbtn" id="skillAdd">＋ 添加 Skill</button>
-  </section>
-
-  <!-- MCP Tab -->
-  <section class="pane" id="pane-mcp">
-    <div class="list" id="mcpList"></div>
-    <button class="addbtn" id="mcpAdd">＋ 添加 MCP</button>
-  </section>
-
-  <!-- Codex 式底部按键行 -->
-  <footer class="actions">
-    <button class="abtn" id="btnOpen">◧ 打开工作台</button>
-    <button class="abtn" id="btnRestart">↻ 重启服务</button>
-    <button class="abtn" id="btnUpdate">↻ 检查更新</button>
-    <button class="abtn" id="btnDshUpdate" hidden>⬆ dsh</button>
-    <button class="abtn" id="btnSkin">🎨 皮肤</button>
-    <button class="abtn" id="btnGuide">? 使用说明</button>
-  </footer>
 
   <!-- MCP 添加弹层（手动添加 / 导入已有 两种模式） -->
   <div class="modal" id="mcpModal" hidden>
@@ -89,7 +135,7 @@
           </label>
         </div>
       </div>
-      <!-- 导入已有视图：列出 cordis.patch.yml 中发现的外部 MCP -->
+      <!-- 导入已有视图：列出外部 MCP -->
       <div id="importFields" hidden>
         <div class="list" id="importList" style="max-height:200px;overflow-y:auto"></div>
         <div class="empty" id="importEmpty" hidden>没有发现可导入的 MCP 实例</div>
@@ -97,25 +143,6 @@
       <div class="modal-actions">
         <button class="abtn" id="mcpCancel">取消</button>
         <button class="abtn primary" id="mcpSave" hidden>保存</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 皮肤弹层：选择图片应用 / 透明度调节 / 恢复默认 -->
-  <div class="modal" id="skinModal" hidden>
-    <div class="modal-body">
-      <h3>更换皮肤</h3>
-      <p class="hint">把本地图片设置为 dsh 工作台的背景（支持 png / jpg / webp / gif，10MB 以内）。切换与透明度调节实时生效，主窗口立即看到效果。</p>
-      <div class="mode-switch">
-        <button class="abtn primary" id="skinPick">🎨 选择图片应用</button>
-        <button class="abtn" id="skinReset">↺ 恢复默认背景</button>
-      </div>
-      <label style="display:flex;flex-direction:column;gap:4px;color:#9fb0e0;font-size:12px;margin-top:10px">
-        背景透明度：<span id="skinOpacityVal">100%</span>
-        <input type="range" id="skinOpacitySlider" min="10" max="100" value="100" />
-      </label>
-      <div class="modal-actions">
-        <button class="abtn" id="skinCancel">关闭</button>
       </div>
     </div>
   </div>

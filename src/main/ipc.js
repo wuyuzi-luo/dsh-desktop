@@ -153,16 +153,21 @@ export function registerIpc(deps) {
     });
     if (result.canceled || !result.filePaths.length) return { canceled: true }; // 用户取消
     const imagePath = result.filePaths[0]; // 所选图片
-    if (!isValidSkinImage(imagePath)) return { error: '图片格式不支持' }; // 校验失败
-    setConfig('skinImage', imagePath); // 持久化皮肤路径
-    await applySkin(win); // 立即应用（注入 dsh 工作台）
+    if (!isValidSkinImage(imagePath)) return { error: '图片格式不支持（支持 png/jpg/jpeg/webp/gif/bmp）' }; // 校验失败
+    try {
+      setConfig('skinImage', imagePath); // 持久化皮肤路径
+      await applySkin(win); // 立即应用（压缩后注入 dsh 工作台）
+    } catch (err) { // 读图/压缩/注入失败
+      setConfig('skinImage', ''); // 回滚配置
+      return { error: String(err?.message ?? err) }; // 把原因带回面板
+    }
     return { ok: true, path: imagePath }; // 回报
   });
 
   // 恢复默认背景
-  ipcMain.handle(IPC.SKIN_CLEAR, () => {
+  ipcMain.handle(IPC.SKIN_CLEAR, async () => {
     setConfig('skinImage', ''); // 清空皮肤配置
-    clearSkin(getMainWindow()); // 移除注入
+    await clearSkin(getMainWindow()); // 删除注入标签（立即生效）
     return { ok: true };
   });
 
@@ -170,7 +175,7 @@ export function registerIpc(deps) {
   ipcMain.handle(IPC.SKIN_OPACITY, async (_e, value) => {
     const v = Math.min(100, Math.max(0, Number(value) || 100)); // 夹取 0~100
     setConfig('skinOpacity', v); // 持久化
-    await applySkin(getMainWindow()); // 实时重注入（移除旧 CSS 后按新透明度注入）
+    await applySkin(getMainWindow()); // 实时重注入（幂等替换 style 标签）
     return { ok: true, opacity: v };
   });
 
