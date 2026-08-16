@@ -1,0 +1,38 @@
+{
+  "name": "dsh-desktop-launcher",
+  "version": "0.1.0",
+  "description": "dsh plugin: launch the dsh-desktop Windows shell (tray, Skills/MCP panel, custom skins, auto-update) from the DSH conversation via a desktop_launch tool.",
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "author": "wuyuzi-luo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wuyuzi-luo/dsh-desktop.git",
+    "directory": "plugin"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "electron",
+    "desktop"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
