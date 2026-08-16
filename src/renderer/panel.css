@@ -23,6 +23,7 @@ body {
 .status-dot.running { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
 .status-dot.starting { background: #d29922; }
 .status-dot.error { background: #e5484d; }
+.status-dot.missing { background: #e5484d; }
 .status-text { font-weight: 500; }
 .addr { margin-left: auto; color: #5d6b98; font-size: 11.5px; }
 

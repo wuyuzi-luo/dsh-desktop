@@ -9,6 +9,10 @@ const IPC = {
   APP_STATE: 'app:state', // 主进程推送
   WORKSPACE_OPEN: 'workspace:open', // 打开工作区
   SERVICE_RETRY: 'service:retry', // 服务重试
+  SETUP_PICK_DSH_DIR: 'setup:pick-dsh-dir', // 选择 dsh 安装目录
+  SETUP_AUTO_INSTALL: 'setup:auto-install', // 自动安装 dsh
+  GUIDE_ENTER: 'guide:enter', // 引导页进入工作台
+  GUIDE_OPEN: 'guide:open', // 打开使用说明
   NOTIFY_TEST: 'notify:test', // 测试通知
   APP_OPEN_WEB_UI: 'app:open-web-ui', // 打开工作台
   SERVICE_RESTART: 'service:restart', // 重启服务
@@ -38,6 +42,14 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   openWorkspace: (summary) => ipcRenderer.invoke(IPC.WORKSPACE_OPEN, summary),
   // 服务重试
   retryService: () => ipcRenderer.invoke(IPC.SERVICE_RETRY),
+  // 选择 dsh 安装目录（boot 页 missing 态引导）
+  pickDshDir: () => ipcRenderer.invoke(IPC.SETUP_PICK_DSH_DIR),
+  // 自动安装 dsh（boot 页 missing 态"帮我安装"）
+  autoInstallDsh: () => ipcRenderer.invoke(IPC.SETUP_AUTO_INSTALL),
+  // 引导页"进入工作台"
+  enterWorkbench: () => ipcRenderer.invoke(IPC.GUIDE_ENTER),
+  // 打开使用说明引导页
+  openGuide: () => ipcRenderer.invoke(IPC.GUIDE_OPEN),
   // 服务重启
   restartService: () => ipcRenderer.invoke(IPC.SERVICE_RESTART),
   // 测试通知

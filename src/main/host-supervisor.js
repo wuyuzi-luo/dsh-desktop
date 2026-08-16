@@ -4,6 +4,7 @@
 import { spawn, exec } from 'node:child_process'; // spawn 启动子进程；exec 跑 netstat 探测
 import { promisify } from 'node:util'; // 把回调 API 转 Promise
 import { EventEmitter } from 'node:events'; // 状态变化事件
+import { existsSync } from 'node:fs'; // 检查 CLI 入口是否存在（未装 dsh 时进 missing 态）
 import { getConfig, getDshCliEntry } from './config.js'; // 读配置与 CLI 入口路径
 
 const execP = promisify(exec); // netstat 探测用 Promise 形式
@@ -100,17 +101,21 @@ export function createHostSupervisor() {
       owned = false; // 不是自己 spawn 的，退出时不杀
       return 'reused'; // 报告复用
     }
+    if (!existsSync(getDshCliEntry())) { // dsh CLI 入口不存在（未安装或路径不对）
+      setState('missing'); // 进 missing 态：boot 页引导用户选择安装目录
+      return 'missing'; // 报告缺失（不 spawn，避免无意义的启动失败）
+    }
     setState('starting'); // 进入启动中
     const parser = createReadinessParser(); // 建就绪解析器
     const cliEntry = getDshCliEntry(); // CLI 入口绝对路径
     const cwd = getConfig('dshDir'); // 工作目录 = dsh 安装目录
     const env = { ...process.env, DSH_HOME: getConfig('dshHome') }; // 注入数据目录环境变量
-    child = spawn('node', [cliEntry, 'web'], {
+    child = spawn('node', [cliEntry, 'web', '--port', String(port)], {
       cwd, // 工作目录
       env, // 环境变量
       stdio: ['ignore', 'pipe', 'pipe'], // 关 stdin，接管 stdout/stderr
       windowsHide: true // 不弹黑窗
-    }); // 直接 node 起 bin.js（PID 即服务本体）
+    }); // 直接 node 起 bin.js（PID 即服务本体；--port 必须传：否则 dsh 起默认 3080，与探测/心跳端口不一致会被心跳误杀）
     owned = true; // 标记为自己托管
 
     // 就绪等待：stdout 解析为主

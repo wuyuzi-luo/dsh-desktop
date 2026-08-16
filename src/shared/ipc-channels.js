@@ -9,6 +9,14 @@ export const IPC = {
   WORKSPACE_OPEN: 'workspace:open',
   // boot 页"重试"按钮 → 重新拉起服务
   SERVICE_RETRY: 'service:retry',
+  // boot 页 missing 态"选择 dsh 安装目录"按钮 → 弹目录选择器并写配置
+  SETUP_PICK_DSH_DIR: 'setup:pick-dsh-dir',
+  // boot 页 missing 态"帮我安装"按钮 → 自动检测 Node 并 npm 安装 dsh
+  SETUP_AUTO_INSTALL: 'setup:auto-install',
+  // 引导页"进入工作台"按钮 → 写已读版本并切 Web UI
+  GUIDE_ENTER: 'guide:enter',
+  // 面板"使用说明"按钮 → 主窗口重新打开引导页
+  GUIDE_OPEN: 'guide:open',
   // 面板"测试通知"按钮
   NOTIFY_TEST: 'notify:test',
   // 面板"打开工作台"按钮 → 显示主窗口

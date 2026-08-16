@@ -13,6 +13,7 @@ const els = {
   btnOpen: document.getElementById('btnOpen'), // 打开工作台
   btnRestart: document.getElementById('btnRestart'), // 重启服务
   btnUpdate: document.getElementById('btnUpdate'), // 检查更新
+  btnGuide: document.getElementById('btnGuide'), // 使用说明
   skillAdd: document.getElementById('skillAdd'), // 添加技能
   mcpAdd: document.getElementById('mcpAdd'), // 添加 MCP
   mcpModal: document.getElementById('mcpModal') // MCP 表单弹层
@@ -23,7 +24,7 @@ let snapshot = null; // 最近一次全量快照缓存
 // 渲染服务状态行
 function renderService() {
   const state = snapshot?.service ?? 'stopped'; // 当前状态
-  const map = { running: '服务运行中', starting: '服务启动中', error: '服务异常', stopped: '服务已停止' }; // 文案表
+  const map = { running: '服务运行中', starting: '服务启动中', error: '服务异常', missing: '未找到 dsh', stopped: '服务已停止' }; // 文案表
   els.svcDot.className = 'status-dot' + (state !== 'stopped' ? ' ' + state : ''); // 状态色
   els.svcText.textContent = map[state] ?? state; // 文案
   els.svcUrl.textContent = snapshot?.url ?? ''; // 地址
@@ -184,6 +185,7 @@ els.btnUpdate.addEventListener('click', async () => { // 检查更新
   await window.dshDesktop.checkUpdate(); // 检查
   setTimeout(refreshAll, 2000); // 稍后刷新
 });
+els.btnGuide.addEventListener('click', () => window.dshDesktop.openGuide()); // 主窗口打开使用说明
 
 // 技能添加：调主进程弹选择（文件夹或 zip）
 els.skillAdd.addEventListener('click', async () => { // 安装技能

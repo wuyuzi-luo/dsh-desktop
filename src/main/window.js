@@ -52,6 +52,11 @@ export function loadWebUi(window, url) {
   if (window && !window.isDestroyed()) window.loadURL(url); // 切换加载
 }
 
+// 主窗口加载使用说明引导页（首次启动/升级后首次/面板"使用说明"按钮）
+export function loadGuide(window) {
+  if (window && !window.isDestroyed()) window.loadFile(join(RENDERER_DIR, 'guide.html')); // 加载引导页
+}
+
 // 向主窗口的 boot 页推送服务状态文案（启动中/就绪/错误）
 export function pushBootState(window, payload) {
   if (window && !window.isDestroyed()) { // 窗口有效

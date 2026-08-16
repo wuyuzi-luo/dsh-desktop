@@ -1,6 +1,7 @@
 // 应用配置模块：electron-store 持久化，全部可配置项集中在这里，避免硬编码
 
 import Store from 'electron-store'; // 本地 JSON 配置存储（存于 userData/config.json）
+import { existsSync } from 'node:fs'; // 文件存在性检查（校验 dsh 安装目录用）
 
 // 默认 dsh 安装目录（用户机器上的实际位置，可被配置覆盖）
 const DEFAULT_DSH_DIR = 'D:\\deepseek-harness';
@@ -16,7 +17,8 @@ const store = new Store({
     dshDir: DEFAULT_DSH_DIR, // dsh 安装目录
     dshHome: process.env.DSH_HOME || DEFAULT_DSH_HOME, // dsh 数据目录
     stopOnQuit: true, // 托盘退出时是否停止"自己托管"的服务
-    deepLink: 'off' // 深链模式：off=始终打开目录；预留 auto 供日后切换
+    deepLink: 'off', // 深链模式：off=始终打开目录；预留 auto 供日后切换
+    guideSeenVersion: '' // 已看过使用说明引导的版本号（与当前版本不同则启动时显示引导页）
   }
 });
 
@@ -35,10 +37,27 @@ export function getAllConfig() {
   return store.store; // 返回底层配置对象
 }
 
-// 计算 dsh CLI 入口文件的绝对路径（node_modules 下官方 bin 入口）
+// 计算指定目录下 dsh CLI 入口文件的绝对路径（node_modules 下官方 bin 入口）
+export function resolveDshBin(dir) {
+  return `${dir}\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js`; // 官方 package.json 的 bin 路径
+}
+
+// 计算当前配置下 dsh CLI 入口文件的绝对路径
 export function getDshCliEntry() {
-  const dshDir = getConfig('dshDir'); // 读 dsh 安装目录
-  return `${dshDir}\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js`; // 官方 package.json 的 bin 路径
+  return resolveDshBin(getConfig('dshDir')); // 用当前配置的安装目录拼路径
+}
+
+// 判断某目录是否为有效 dsh 安装目录（CLI 入口文件存在才算）
+export function isValidDshDir(dir) {
+  return typeof dir === 'string' && dir.length > 0 && existsSync(resolveDshBin(dir)); // 非空且 bin.js 存在
+}
+
+// 写入 dsh 安装目录；dshHome 未显式配置且无 DSH_HOME 环境变量时默认跟随新目录
+export function setDshDir(dir) {
+  setConfig('dshDir', dir); // 持久化新安装目录
+  if (!store.has('dshHome') && !process.env.DSH_HOME) { // 数据目录从未被用户显式设置
+    setConfig('dshHome', `${dir}\\home`); // 跟随为 <dsh 目录>\home（新装的 dsh 用新 home）
+  }
 }
 
 // 计算 web profile 的 cordis.patch.yml 路径（MCP 管理写入位置）

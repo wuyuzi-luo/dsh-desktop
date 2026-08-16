@@ -13,3 +13,6 @@
   nsExec::ExecToStack 'cmd /c "for /f "tokens=5" %a in ('"'"'netstat -ano ^| findstr :3080 ^| findstr LISTENING'"'"') do taskkill /F /PID %a"'
   Pop $0 ; 丢弃返回码（杀不到也不阻塞卸载）
 !macroend
+
+; 注意：完成页不再自定义（使用说明改为应用内引导页，首次启动自动显示）；
+; 使用说明.txt 仍随安装包装入应用目录，供离线查阅。

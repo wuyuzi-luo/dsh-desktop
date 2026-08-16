@@ -24,8 +24,12 @@ nsis:
   createStartMenuShortcut: true # 开始菜单快捷方式
   uninstallDisplayName: DeepSeek Harness 桌面 # 卸载程序显示名
   deleteAppDataOnUninstall: false # 卸载保留配置（升级不丢数据）
-  include: build/installer.nsh # 自定义 NSIS 片段（默认路径 + 卸载杀服务）
+  include: build/installer.nsh # 自定义 NSIS 片段（默认路径 + 卸载杀服务 + 完成页打开使用说明）
+  license: build/license.txt # 安装向导的许可协议页（安全提示与注意条款，需同意才能继续）
   artifactName: dsh-desktop-setup-${version}.exe # 安装包命名
+extraFiles: # 安装目录根下额外文件（customFinish 打开使用说明用）
+  - from: build/使用说明.txt # 源文件
+    to: 使用说明.txt # 目标名
 publish:
   provider: github # 更新通道：GitHub Releases（electron-updater 消费 latest.yml）
   owner: wuyuzi-luo # 发布账号（gh 已登录）

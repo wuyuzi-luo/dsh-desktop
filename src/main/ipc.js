@@ -2,12 +2,18 @@
 // 依赖由 index.js 注入（supervisor/notifier/updater），避免模块间循环引用
 
 import { ipcMain, app, dialog } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
+import { spawn, exec } from 'node:child_process'; // spawn 跑 npm 安装；exec 检测 Node 版本
+import { promisify } from 'node:util'; // 把回调 API 转 Promise
+import { mkdirSync, existsSync } from 'node:fs'; // 建安装目录 / 判断盘符存在
 import { IPC } from '../shared/ipc-channels.js'; // 通道名常量
-import { getMainWindow } from './window.js'; // 主窗口
+import { getMainWindow, pushBootState, loadGuide, loadWebUi } from './window.js'; // 主窗口操作与 boot 页状态推送
 import { loadWorkspaces, openWorkspace } from './workspace.js'; // 工作区
 import { listSkills, toggleSkill, installSkill, readSkillContent } from './skill-manager.js'; // 技能
 import { listMcps, addMcp, removeMcp, toggleMcp, listImportableMcps, adoptMcp } from './mcp-manager.js'; // MCP
-import { getConfig } from './config.js'; // 配置
+import { getConfig, setConfig, isValidDshDir, setDshDir } from './config.js'; // 配置读取/写入与 dsh 目录校验
+
+const execP = promisify(exec); // Promise 化 exec（Node 版本检测用）
+let installing = false; // 自动安装防重入标志（模块级）
 
 // 组装面板状态快照（面板打开/刷新时拉取一次全量）
 export async function buildStateSnapshot(deps) {
@@ -47,6 +53,35 @@ export function registerIpc(deps) {
     return supervisor ? supervisor.ensureRunning() : 'no-supervisor'; // 重新拉起
   });
 
+  // 引导选择 dsh 安装目录（boot 页 missing 态）：弹目录选择器 → 校验 → 写配置 → 自动重试
+  ipcMain.handle(IPC.SETUP_PICK_DSH_DIR, async () => {
+    const win = getMainWindow(); // 父窗口
+    const result = await dialog.showOpenDialog(win, { // 目录选择对话框
+      title: '选择 dsh 安装目录', // 标题
+      buttonLabel: '使用此目录', // 确认按钮文案
+      properties: ['openDirectory'] // 只选目录
+    });
+    if (result.canceled || !result.filePaths.length) return { canceled: true }; // 用户取消
+    const dir = result.filePaths[0]; // 所选目录
+    if (!isValidDshDir(dir)) { // 校验失败：目录里没有 dsh CLI 入口
+      return { error: `所选目录中未找到 dsh（缺少 ${dir}\\node_modules\\@deepseek-ai\\dsh）` }; // 带回错误文案
+    }
+    setDshDir(dir); // 写配置（dshHome 未显式设置时自动跟随 <dir>\home）
+    await supervisor?.restart(); // 重新拉起服务（状态推送会驱动 boot 页跳转）
+    return { ok: true }; // 回报成功
+  });
+
+  // 自动安装 dsh（boot 页 missing 态"帮我安装"）：Node 检测 → npm install → 校验 → 写配置 → 重启
+  ipcMain.handle(IPC.SETUP_AUTO_INSTALL, async () => {
+    if (installing) return { error: 'busy' }; // 防重复点击
+    installing = true; // 置防重入标志
+    try {
+      return await autoInstallDsh(deps); // 主流程
+    } finally {
+      installing = false; // 复位
+    }
+  });
+
   // 服务重启（面板按钮）
   ipcMain.handle(IPC.SERVICE_RESTART, async () => {
     return supervisor ? supervisor.restart() : 'no-supervisor'; // 重启
@@ -62,6 +97,22 @@ export function registerIpc(deps) {
   ipcMain.handle(IPC.APP_OPEN_WEB_UI, () => {
     const win = getMainWindow(); // 主窗口
     if (win) { win.show(); win.restore(); win.focus(); } // 显示聚焦
+    return true;
+  });
+
+  // 引导页"进入工作台"：记录已读版本并切到 dsh Web UI
+  ipcMain.handle(IPC.GUIDE_ENTER, () => {
+    setConfig('guideSeenVersion', app.getVersion()); // 标记当前版本引导已读（下次启动不再弹）
+    const win = getMainWindow(); // 主窗口
+    const url = supervisor?.getStatus().url || `http://127.0.0.1:${getConfig('port')}`; // 服务地址（优先就绪行解析出的）
+    loadWebUi(win, url); // 切到 Web UI
+    return true;
+  });
+
+  // 面板"使用说明"按钮：主窗口重新打开引导页
+  ipcMain.handle(IPC.GUIDE_OPEN, () => {
+    const win = getMainWindow(); // 主窗口
+    if (win) { win.show(); win.restore(); win.focus(); loadGuide(win); } // 显示并加载引导页
     return true;
   });
 
@@ -113,4 +164,73 @@ export function registerIpc(deps) {
     const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用（注册早于创建）
     return updater ? updater.manualCheck() : { status: 'idle' }; // 检查并返回
   });
+}
+
+// 自动安装 dsh 主流程（独立函数：逻辑长，与注册代码分开）
+async function autoInstallDsh(deps) {
+  const { supervisor } = deps; // 依赖解构（重启服务用）
+  const win = getMainWindow(); // boot 页窗口
+  const push = (phase, text) => pushBootState(win, { type: 'setup', phase, text }); // 进度推送便捷函数
+
+  // 1. 检测 Node.js（dsh 官方要求 ^22.19.0 || >=24.0.0）
+  let nodeOk = false; // 版本是否达标
+  try {
+    const { stdout } = await execP('node -v'); // 取版本串（如 v24.16.0）
+    const [major = 0, minor = 0] = stdout.trim().replace(/^v/, '').split('.').map(Number); // 解析主次版本
+    nodeOk = major >= 24 || (major === 22 && minor >= 19); // 官方支持范围判断
+  } catch { nodeOk = false; } // node 不在 PATH 视为未安装
+  if (!nodeOk) { // Node 缺失或版本不足
+    push('error', '未检测到可用的 Node.js（需要 22.19+ 或 24+）。请先安装 Node.js 后点击重试'); // 引导文案
+    return { error: 'need-node' }; // 返回错误码（boot 页展示）
+  }
+
+  // 2. 确定安装目录：D 盘存在用 D:\deepseek-harness；否则用用户目录（C 盘根目录建目录需要管理员权限）
+  const target = existsSync('D:\\') ? 'D:\\deepseek-harness' : `${process.env.USERPROFILE}\\deepseek-harness`;
+  try {
+    mkdirSync(target, { recursive: true }); // 先建目录
+  } catch {
+    push('error', `无法创建安装目录 ${target}，请改用"选择已安装目录"`); // 建目录失败提示
+    return { error: 'mkdir-failed' }; // 返回错误
+  }
+
+  push('start', `正在安装 dsh 到 ${target}，需要几分钟，请保持网络畅通…`); // 开始提示
+
+  // 3. npm install（shell:true 保证 Windows 下 npm.cmd 可解析；windowsHide 不弹黑窗）
+  const child = spawn('npm', ['install', '@deepseek-ai/dsh', '--no-fund', '--no-audit'], {
+    cwd: target, // 安装到目标目录
+    shell: true, // Windows 批处理包装
+    windowsHide: true // 隐藏控制台窗口
+  });
+  let tail = ''; // 输出尾部缓冲（失败时诊断展示）
+  const feed = (chunk) => { // 统一处理 stdout/stderr 数据块
+    const text = chunk.toString('utf8'); // 转字符串
+    tail = (tail + text).slice(-8192); // 只留尾部 8KB
+    for (const line of text.split(/\r?\n/)) { // 逐行推送进度
+      if (line.trim()) push('line', line.trim()); // 非空行才推
+    }
+  };
+  child.stdout.on('data', feed); // 转发标准输出
+  child.stderr.on('data', feed); // 转发错误输出
+
+  // 等安装结束（30 分钟看门狗防网络挂起；实测慢网络约 8 分钟）
+  const code = await new Promise((resolve) => {
+    const timer = setTimeout(() => { try { child.kill(); } catch { /* 已死忽略 */ } resolve(null); }, 30 * 60_000); // 超时强杀
+    child.on('exit', (c) => { clearTimeout(timer); resolve(c); }); // 正常退出
+  });
+  if (code !== 0) { // 安装失败（含看门狗超时）
+    push('error', '安装失败，请检查网络后重试'); // 失败提示
+    return { error: 'npm-failed', log: tail.slice(-2000) }; // 带回尾部日志供 boot 页展示
+  }
+
+  // 4. 校验安装结果（npm 成功但入口缺失的极端情况兜底）
+  if (!isValidDshDir(target)) { // 目录里没有 dsh CLI 入口
+    push('error', '安装完成但未找到 dsh 入口，请改用"选择已安装目录"'); // 提示改用手动选择
+    return { error: 'invalid' }; // 返回错误
+  }
+  setDshDir(target); // 写配置（dshHome 未显式设置时自动跟随 <dir>\home）
+
+  // 5. 自动重启服务（状态推送驱动 boot 页跳转 Web UI）
+  push('done', 'dsh 安装完成，正在启动服务…'); // 完成提示
+  await supervisor?.restart(); // 重新拉起
+  return { ok: true, dir: target }; // 回报成功与安装位置
 }

@@ -5,7 +5,7 @@ import { app, globalShortcut, Notification } from 'electron'; // Electron 命名
 import { createHostSupervisor } from './host-supervisor.js'; // 服务托管
 import { createEventBridge } from './event-bridge.js'; // SSE 事件桥
 import { createNotifier } from './notifications.js'; // 桌面通知
-import { createMainWindow, getMainWindow, loadWebUi, pushBootState, createPanelWindow, pushPanelUpdate } from './window.js'; // 窗口
+import { createMainWindow, getMainWindow, loadWebUi, loadGuide, pushBootState, createPanelWindow, pushPanelUpdate } from './window.js'; // 窗口
 import { createTray, destroyTray } from './tray.js'; // 托盘
 import { registerIpc, buildStateSnapshot } from './ipc.js'; // IPC 与状态快照
 import { initMcpManager } from './mcp-manager.js'; // MCP 同步
@@ -103,7 +103,11 @@ if (!gotLock) {
       pushPanelUpdate({ type: 'service', state }); // 推给面板
       refreshTray(); // 刷新托盘
       if (state === 'running' && !win.webContents.getURL().startsWith('http')) { // 就绪且还没进 Web UI（getURL 为空也算：boot 页导航未完成时不误判）
-        loadWebUi(win, `http://127.0.0.1:${getConfig('port')}`); // 切到 dsh Web UI
+        if (getConfig('guideSeenVersion') !== app.getVersion()) { // 首次运行或升级后首次：先看使用说明
+          loadGuide(win); // 加载引导页（点"进入工作台"后由 IPC 切到 Web UI）
+        } else {
+          loadWebUi(win, `http://127.0.0.1:${getConfig('port')}`); // 已看过引导：直接切到 dsh Web UI
+        }
       }
       if (state === 'error') { // 启动失败
         notifier?.onServiceError(supervisor.getStderrTail().slice(-200)); // 通知（含诊断尾部）

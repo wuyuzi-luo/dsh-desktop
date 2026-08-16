@@ -15,7 +15,8 @@ let tray = null; // 托盘单例
 // 创建/更新托盘（服务状态变化时换状态色图标与菜单）
 export function createTray({ state, onShow, onQuit, onOpenPanel, workspaces, onOpenWorkspace }) {
   // 按状态选 PNG 文件（running/error/stopped 三色；缺文件回退到 icon.ico）
-  const trayPng = join(BUILD_DIR, `tray-${state}.png`); // 目标文件
+  const trayState = state === 'missing' ? 'error' : state; // missing 复用 error 色图标（警示未安装）
+  const trayPng = join(BUILD_DIR, `tray-${trayState}.png`); // 目标文件
   const iconPath = existsSync(trayPng) ? trayPng : join(BUILD_DIR, 'icon.ico'); // 回退链
   const image = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty(); // 从文件读图标（Windows 可靠方式）
 
