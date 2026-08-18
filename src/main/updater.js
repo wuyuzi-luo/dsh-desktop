@@ -1,7 +1,7 @@
 // 更新模块（无依赖手动路线）：
-// APP：查 GitHub Releases 最新版 → 比较版本 → 提示用户 → 确认后下载 → 点击通知安装
-// dsh 本体：读本机版本 + npm view 对比 → 提示用户 → 确认后 npm install 更新并重启服务
-// 更新安装由 NSIS 安装器完成（覆盖安装即升级，userData 配置自动保留）
+// APP：查 GitHub Releases 最新版 → 启动发现新版弹应用内更新弹窗（更新/暂不更新）→ 确认后下载 → 下载完成弹"请重启桌面端"
+// dsh 本体：读本机版本 + npm view 对比 → 启动发现新版同样弹窗 → 确认后 npm install 更新并重启服务
+// 弹窗与系统通知双保险；控制面板内两个按钮常显各自状态（含"已是最新"），无需先点检测
 // 放弃 electron-updater：其 6.8.9 与 Electron 43 ESM 主进程不兼容（内部 app 引用为空）
 
 import { app, shell, Notification } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
@@ -9,7 +9,7 @@ import { join } from 'node:path'; // 路径拼接
 import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 文件写出/读取
 import { spawn, exec } from 'node:child_process'; // npm 更新 dsh 用
 import { promisify } from 'node:util'; // 回调转 Promise
-import { getMainWindow } from './window.js'; // 主窗口引用
+import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog } from './window.js'; // 主窗口引用 + 更新弹窗
 import { getConfig } from './config.js'; // 配置读取
 
 // 用户网络环境（MITM 代理/杀软证书劫持）下 undici fetch 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE，
@@ -19,6 +19,8 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const execP = promisify(exec); // npm view 用
 // GitHub 发布仓库（与 electron-builder.yml 的 publish 配置一致）
 const REPO = 'wuyuzi-luo/dsh-desktop';
+// dsh 官方仓库（拿本体更新说明用）
+const DSH_REPO = 'deepseek-ai/deepseek-harness';
 // APP 更新状态缓存（面板拉取用）
 let updaterState = { status: 'idle', info: null }; // idle | checking | available | downloading | downloaded | error | up-to-date
 // dsh 本体更新状态缓存
@@ -27,6 +29,9 @@ let dshState = { status: 'idle', current: null, latest: null }; // idle | checki
 let openPanelFn = null; // 打开控制面板（通知点击用）
 let restartServiceFn = null; // 重启 dsh 服务（本体更新后用）
 let updatingDsh = false; // dsh 更新防重入标志
+let appDialogShown = false; // APP 确认弹窗本次进程只弹一次
+let dshDialogShown = false; // dsh 确认弹窗本次进程只弹一次
+let dialogType = null; // 弹窗当前对应的组件类型（app | dsh）
 
 // 推送全部更新状态给面板（面板若开着）
 function pushState() {
@@ -51,7 +56,7 @@ function compareVersions(a, b) {
   return 0; // 相同
 }
 
-// 弹"新版本可用"通知：点击打开控制面板（由用户决定是否更新）
+// 弹"新版本可用"系统通知：点击打开控制面板（后台提醒，防用户手快关掉弹窗）
 function notifyAvailable(title, body) {
   try {
     const n = new Notification({ title, body, silent: false }); // 系统通知
@@ -60,8 +65,21 @@ function notifyAvailable(title, body) {
   } catch { /* 通知失败忽略 */ }
 }
 
-// —— APP 更新：只检测与提示，下载由用户确认后触发 ——
-export async function checkForUpdates({ manual = false } = {}) {
+// 显示更新弹窗（未创建则先创建；页面加载中则等加载完再推送，防止内容丢失）
+function showDialog(payload) {
+  createUpdateDialogWindow(); // 确保窗口存在
+  pushUpdateDialog(payload); // 推送内容（window.js 内部处理加载时序）
+}
+
+// 弹"发现新版本"确认弹窗（组件名 + 版本对比 + 更新内容 + 更新/暂不更新按钮）
+function showConfirmDialog(type, label, current, latest, notes) {
+  dialogType = type; // 记录弹窗组件类型（按钮"立即更新"时决定执行哪条更新链路）
+  showDialog({ phase: 'confirm', type, label, current, latest, notes: notes || '' }); // 推送确认页
+}
+
+// —— APP 更新：检测 + 弹窗/通知提示，下载由用户确认后触发 ——
+// 参数：popup=检测到新版弹应用内弹窗；notify=弹系统通知（面板静默补查时两者都关）
+export async function checkForUpdates({ popup = true, notify = true } = {}) {
   setApp('checking'); // 检查中
   try {
     // 查 GitHub Releases 最新版元信息
@@ -79,23 +97,28 @@ export async function checkForUpdates({ manual = false } = {}) {
     }
     const asset = (release.assets ?? []).find((a) => String(a.name).endsWith('.exe')); // 找安装包资源
     if (!asset) throw new Error('no exe asset'); // 无安装包
-    setApp('available', { version: remote, url: asset.browser_download_url }); // 有新版本：仅提示
-    notifyAvailable('dsh 桌面新版本可用', `发现 v${remote}（当前 v${app.getVersion()}），点击打开控制面板更新`); // 通知提示
+    setApp('available', { version: remote, url: asset.browser_download_url, notes: String(release?.body ?? '') }); // 有新版（带上更新说明）
+    if (popup && !appDialogShown) { // 启动检测时弹应用内弹窗（本次进程只弹一次）
+      appDialogShown = true; // 置标志
+      showConfirmDialog('app', 'dsh 桌面端', app.getVersion(), remote, release?.body); // 确认弹窗
+    }
+    if (notify) notifyAvailable('dsh 桌面新版本可用', `发现 v${remote}（当前 v${app.getVersion()}），可在控制面板更新`); // 系统通知双保险
   } catch (err) {
     setApp('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
   }
   return updaterState; // 返回状态
 }
 
-// 用户确认后下载安装包（面板"更新"按钮触发）
+// 用户确认后下载安装包（弹窗"立即更新"或面板按钮触发）
 export async function downloadUpdate() {
   const info = updaterState.info; // 可用版本信息
   if (updaterState.status !== 'available' || !info?.url) return updaterState; // 状态不符不下载
   setApp('downloading', { version: info.version, percent: 0 }); // 进入下载（0%）
+  showDialog({ phase: 'downloading', percent: 0 }); // 弹窗切到下载进度页
   try {
     const dl = await fetch(info.url, { signal: AbortSignal.timeout(600000) }); // 下载安装包（最长 10 分钟）
     if (!dl.ok || !dl.body) throw new Error(`download HTTP ${dl.status}`); // 下载失败
-    // 流式读取：边下载边报进度（面板显示百分比）
+    // 流式读取：边下载边报进度（弹窗进度条 + 面板百分比）
     const total = Number(dl.headers.get('content-length')) || 0; // 总字节（缺省 0 表示未知）
     const reader = dl.body.getReader(); // 流读取器
     const chunks = []; // 分块缓冲
@@ -105,7 +128,11 @@ export async function downloadUpdate() {
       if (done) break; // 完成
       chunks.push(value); // 收集
       received += value.length; // 累加
-      if (total) setApp('downloading', { version: info.version, percent: Math.round((received / total) * 100) }); // 报进度
+      if (total) { // 已知总量才报进度
+        const percent = Math.round((received / total) * 100); // 百分比
+        setApp('downloading', { version: info.version, percent }); // 面板状态
+        showDialog({ phase: 'downloading', percent }); // 弹窗进度
+      }
     }
     const buf = Buffer.concat(chunks); // 合并为完整缓冲
     const dlDir = app.getPath('downloads'); // 用户下载目录
@@ -113,12 +140,14 @@ export async function downloadUpdate() {
     const filePath = join(dlDir, `dsh-desktop-setup-${info.version}.exe`); // 目标文件
     await writeFile(filePath, buf); // 落盘
     setApp('downloaded', { version: info.version, path: filePath }); // 下载完成
-    // 弹通知：点击即打开安装包（覆盖安装升级）
-    const n = new Notification({ title: 'dsh 桌面更新已就绪', body: `新版本 v${info.version} 已下载，点击安装（配置将保留）` }); // 通知
+    // 必须弹窗提示：已更新完成，请重启桌面端（用户明确要求，任何触发路径都弹）
+    showDialog({ phase: 'app-done', version: info.version }); // 完成页（立即重启/稍后）
+    const n = new Notification({ title: 'dsh 桌面更新已就绪', body: `新版本 v${info.version} 已下载完成，请重启桌面端（点击打开安装包）` }); // 通知
     n.on('click', () => shell.openPath(filePath)); // 点击打开安装器
     n.show(); // 弹出
   } catch (err) {
     setApp('error', { message: String(err?.message ?? err) }); // 记错误态
+    showDialog({ phase: 'app-error' }); // 弹窗提示下载失败（保持弹窗可见并给出反馈）
   }
   return updaterState; // 返回状态
 }
@@ -135,8 +164,25 @@ async function getLocalDshVersion() {
   }
 }
 
-// 检测 dsh 本体更新（失败不打扰，仅记状态；notify=false 为面板后台补查不弹通知）
-export async function checkDshUpdate({ manual = false, notify = true } = {}) {
+// 获取 dsh 更新说明：官方仓库 release 页找 tag=dsh-v{版本} 的 body（中文更新内容）
+async function getDshReleaseNotes(version) {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${DSH_REPO}/releases?per_page=10`, { // 最近 10 个 release
+      headers: { 'User-Agent': 'dsh-desktop' }, // GitHub API 要求 UA
+      signal: AbortSignal.timeout(10000) // 10s 超时
+    });
+    if (!res.ok) return null; // 拿不到就算了
+    const releases = await res.json(); // 解析列表
+    const hit = (releases ?? []).find((r) => String(r?.tag_name) === `dsh-v${version}`); // 按 tag 匹配
+    return hit?.body ? String(hit.body) : null; // 命中则返回更新内容
+  } catch {
+    return null; // 网络失败 → null（弹窗显示"暂无详细更新说明"）
+  }
+}
+
+// 检测 dsh 本体更新（失败不打扰，仅记状态）
+// 参数：popup=发现新版弹应用内弹窗；notify=弹系统通知（面板静默补查时两者都关）
+export async function checkDshUpdate({ popup = true, notify = true } = {}) {
   const current = await getLocalDshVersion(); // 本机版本
   setDsh('checking', { current }); // 检查中
   if (!current) { setDsh('error', { message: '未检测到 dsh 安装' }); return dshState; } // 无本机版本
@@ -148,8 +194,13 @@ export async function checkDshUpdate({ manual = false, notify = true } = {}) {
       setDsh('up-to-date', { current, latest }); // 已是最新
       return dshState; // 返回
     }
-    setDsh('available', { current, latest }); // 有新版本：仅提示
-    if (notify) notifyAvailable('dsh 本体新版本可用', `dsh v${latest} 已发布（当前 v${current}），点击打开控制面板更新`); // 通知提示（补查不弹）
+    const notes = await getDshReleaseNotes(latest); // 官方 release 更新说明（拿不到为 null）
+    setDsh('available', { current, latest, notes }); // 有新版本（带上更新说明）
+    if (popup && !dshDialogShown) { // 启动检测时弹应用内弹窗（本次进程只弹一次）
+      dshDialogShown = true; // 置标志
+      showConfirmDialog('dsh', 'dsh 本体', current, latest, notes); // 确认弹窗
+    }
+    if (notify) notifyAvailable('dsh 本体新版本可用', `dsh v${latest} 已发布（当前 v${current}），可在控制面板更新`); // 系统通知双保险
   } catch (err) {
     setDsh('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
   }
@@ -163,6 +214,7 @@ export async function updateDsh() {
   if (updatingDsh) return dshState; // 防重入
   updatingDsh = true; // 置标志
   setDsh('updating', { current: dshState.current, latest }); // 更新中
+  showDialog({ phase: 'updating' }); // 弹窗切到"正在更新"页
   try {
     const dir = getConfig('dshDir'); // 安装目录
     const child = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit'], {
@@ -175,8 +227,13 @@ export async function updateDsh() {
       const timer = setTimeout(() => { try { child.kill(); } catch { /* 已死忽略 */ } resolve(null); }, 10 * 60_000); // 超时强杀
       child.on('exit', (c) => { clearTimeout(timer); resolve(c); }); // 正常退出
     });
-    if (code !== 0) { setDsh('error', { message: 'dsh 更新失败（网络或权限问题）' }); return dshState; } // 失败
+    if (code !== 0) { // 失败
+      setDsh('error', { message: 'dsh 更新失败（网络或权限问题）' }); // 记错误态
+      showDialog({ phase: 'dsh-error' }); // 弹窗提示失败
+      return dshState; // 返回
+    }
     setDsh('up-to-date', { current: latest, latest }); // 更新完成
+    showDialog({ phase: 'dsh-done', version: latest }); // 弹窗"已更新完成，服务已重启"
     restartServiceFn?.(); // 重启服务让新版本生效（状态推送驱动界面）
     try { // 成功通知
       const n = new Notification({ title: 'dsh 本体已更新', body: `dsh 已更新到 v${latest}，服务已重启` }); // 通知
@@ -188,18 +245,44 @@ export async function updateDsh() {
   return dshState; // 返回状态
 }
 
+// 弹窗"立即更新"按钮：按弹窗当前组件类型执行对应更新链路
+export async function dialogUpdate() {
+  if (dialogType === 'app') return downloadUpdate(); // APP → 下载安装包（进度/完成弹窗自动接续）
+  if (dialogType === 'dsh') return updateDsh(); // dsh → npm 更新（完成弹窗自动接续）
+  return updaterState; // 无类型（异常）→ 原样返回
+}
+
+// 弹窗"立即重启"按钮：打开已下载的安装包并退出应用（覆盖安装即升级，配置保留）
+export async function dialogRestart() {
+  const path = updaterState.info?.path; // 已下载安装包路径
+  if (path) { // 有路径才操作
+    shell.openPath(path); // 打开 NSIS 安装器
+    app.quit(); // 退出应用让安装器覆盖文件（stopOnQuit 会按配置处理 dsh 服务）
+  } else { // 无路径（异常）
+    closeUpdateDialog(); // 直接关弹窗
+  }
+  return true; // 回报
+}
+
 // 创建更新管理器（面板 IPC 用；index.js 注入回调）
 export function createUpdater(deps = {}) {
   openPanelFn = deps.openPanel ?? null; // 面板打开回调
   restartServiceFn = deps.restartService ?? null; // 服务重启回调
   return {
-    silentCheck: () => checkForUpdates({ manual: false }), // 启动静默检查 APP
-    manualCheck: () => checkForUpdates({ manual: true }), // 面板手动检查 APP
+    silentCheck: () => checkForUpdates({ popup: true, notify: true }), // 启动自动检查 APP（弹窗+通知）
+    manualCheck: () => checkForUpdates({ popup: false, notify: true }), // 面板手动检查 APP（仅通知，结果按钮显示）
+    quietAppCheck: () => checkForUpdates({ popup: false, notify: false }), // 面板打开后台补查 APP（全静默）
     download: downloadUpdate, // 用户确认下载 APP 更新
-    silentDshCheck: () => checkDshUpdate({ manual: false }), // 启动静默检查 dsh
-    manualDshCheck: () => checkDshUpdate({ manual: true }), // 面板手动检查 dsh
-    quietDshCheck: () => checkDshUpdate({ notify: false }), // 面板打开时后台补查（不弹通知）
+    silentDshCheck: () => checkDshUpdate({ popup: true, notify: true }), // 启动自动检查 dsh（弹窗+通知）
+    manualDshCheck: () => checkDshUpdate({ popup: false, notify: true }), // 面板手动检查 dsh（仅通知）
+    quietDshCheck: () => checkDshUpdate({ popup: false, notify: false }), // 面板打开后台补查 dsh（全静默）
+    quietCheckAll: () => Promise.all([ // 面板打开全量静默检查（APP+dsh 并行，不弹窗不通知）
+      checkForUpdates({ popup: false, notify: false }),
+      checkDshUpdate({ popup: false, notify: false })
+    ]),
     updateDsh, // 用户确认更新 dsh
+    dialogUpdate, // 弹窗"立即更新"
+    dialogRestart, // 弹窗"立即重启"
     getState: () => ({ version: app.getVersion(), app: updaterState, dsh: dshState }) // 状态快照
   };
 }

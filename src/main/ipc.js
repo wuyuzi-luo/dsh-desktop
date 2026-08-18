@@ -6,7 +6,7 @@ import { spawn, exec } from 'node:child_process'; // spawn 跑 npm 安装；exec
 import { promisify } from 'node:util'; // 把回调 API 转 Promise
 import { mkdirSync, existsSync } from 'node:fs'; // 建安装目录 / 判断盘符存在
 import { IPC } from '../shared/ipc-channels.js'; // 通道名常量
-import { getMainWindow, pushBootState, loadGuide, loadWebUi } from './window.js'; // 主窗口操作与 boot 页状态推送
+import { getMainWindow, pushBootState, loadGuide, loadWebUi, pushUpdateDialog, closeUpdateDialog } from './window.js'; // 主窗口操作与 boot 页状态推送 + 更新弹窗
 import { loadWorkspaces, openWorkspace } from './workspace.js'; // 工作区
 import { listSkills, toggleSkill, installSkill, readSkillContent, listImportableSkills, adoptSkill } from './skill-manager.js'; // 技能
 import { listMcps, addMcp, removeMcp, toggleMcp, listImportableMcps, adoptMcp } from './mcp-manager.js'; // MCP
@@ -247,6 +247,42 @@ export function registerIpc(deps) {
     if (!updater) return { status: 'idle' }; // 无更新器
     await updater.quietDshCheck(); // 静默检查
     return updater.getState(); // 返回最新快照
+  });
+  ipcMain.handle(IPC.UPDATER_QUIET_CHECK_ALL, async () => { // 面板打开时全量静默检查（APP+dsh，不弹窗不通知）
+    const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用
+    if (!updater) return { status: 'idle' }; // 无更新器
+    await updater.quietCheckAll(); // 并行静默检查
+    return updater.getState(); // 返回最新快照
+  });
+
+  // 更新弹窗按钮动作：update=立即更新 / later=暂不更新 / restart=立即重启 / done=关闭
+  ipcMain.handle(IPC.UPDATE_DIALOG_ACTION, async (_e, action) => {
+    const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用
+    if (action === 'update') { // 立即更新：按弹窗组件类型执行下载/npm 更新
+      return updater ? updater.dialogUpdate() : null; // 更新链路内部自动接续进度/完成弹窗
+    }
+    if (action === 'later') { // 暂不更新：弹窗切告知页
+      pushUpdateDialog({ phase: 'deferred' }); // 告知可在控制面板更新
+      return true;
+    }
+    if (action === 'restart') { // 立即重启：打开安装包并退出应用
+      return updater ? updater.dialogRestart() : null; // 主进程处理
+    }
+    closeUpdateDialog(); // done：关闭弹窗
+    return true;
+  });
+
+  // 通用消息框（面板手动检查后告知"各组件最新情况"，标题/正文由面板传入）
+  ipcMain.handle(IPC.MISC_SHOW_MESSAGE, async (_e, { title, message }) => {
+    const win = getMainWindow(); // 父窗口（面板在时作为模态父窗）
+    await dialog.showMessageBox(win, { // 系统消息框
+      type: 'info', // 信息图标
+      title: String(title ?? '提示'), // 标题
+      message: String(title ?? '提示'), // 主文案
+      detail: String(message ?? ''), // 详细内容（各组件版本/状态）
+      buttons: ['知道了'] // 单按钮
+    });
+    return true;
   });
 }
 

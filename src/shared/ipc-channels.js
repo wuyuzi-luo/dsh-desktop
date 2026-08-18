@@ -64,5 +64,13 @@ export const IPC = {
   // 面板后台补查 dsh 本体（不弹通知）
   UPDATER_DSH_CHECK: 'updater:dsh-check',
   // 更新状态推送（发现新版/下载中/已是最新）
-  UPDATER_STATE: 'updater:state'
+  UPDATER_STATE: 'updater:state',
+  // 更新弹窗：主进程 → 弹窗页推送内容（确认/进度/完成/暂不更新告知）
+  UPDATE_DIALOG_PUSH: 'update-dialog:push',
+  // 更新弹窗：用户点击按钮（update/later/restart/done）
+  UPDATE_DIALOG_ACTION: 'update-dialog:action',
+  // 面板打开时全量静默检查（APP+dsh，不弹窗不通知）
+  UPDATER_QUIET_CHECK_ALL: 'updater:quiet-check-all',
+  // 通用消息框（面板"检查更新"后告知各组件最新情况）
+  MISC_SHOW_MESSAGE: 'misc:show-message'
 };

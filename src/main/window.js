@@ -15,6 +15,7 @@ const ICON_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 
 
 let mainWindow = null; // 主窗口单例
 let panelWindow = null; // 面板窗口单例
+let updateDialogWindow = null; // 更新弹窗窗口单例
 
 // 创建主窗口（启动时加载本地 boot.html；服务就绪后切到 dsh Web UI）
 export function createMainWindow() {
@@ -104,4 +105,54 @@ export function getPanelWindow() {
 export function pushPanelUpdate(payload) {
   const win = getPanelWindow(); // 面板引用
   if (win) win.webContents.send(IPC.APP_STATE, payload); // 推送
+}
+
+// 创建更新弹窗窗口（无边框置顶小窗；检测到新版/下载完成/更新完成时弹出）
+export function createUpdateDialogWindow() {
+  if (updateDialogWindow && !updateDialogWindow.isDestroyed()) return updateDialogWindow; // 已存在直接返回
+  updateDialogWindow = new BrowserWindow({ // 新建弹窗
+    width: 460, // 宽
+    height: 400, // 高
+    show: false, // 先隐藏，ready-to-show 再显示（防闪烁）
+    frame: false, // 无边框（自绘圆角卡片风格）
+    resizable: false, // 不可调大小
+    skipTaskbar: true, // 不出现在任务栏（弹窗性质）
+    alwaysOnTop: true, // 置顶（用户可能已切到其他窗口，更新提示必须可见）
+    icon: existsSync(ICON_PATH) ? ICON_PATH : undefined, // 窗口图标
+    backgroundColor: '#0d1226', // 深蓝底色
+    parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined, // 跟随主窗口（置中于主窗口上方）
+    webPreferences: { // 安全基线同主窗口
+      preload: PRELOAD_PATH,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  updateDialogWindow.once('ready-to-show', () => updateDialogWindow.show()); // 就绪显示
+  updateDialogWindow.loadFile(join(RENDERER_DIR, 'update-dialog.html')); // 加载弹窗页
+  updateDialogWindow.on('closed', () => { updateDialogWindow = null; }); // 关闭时清引用
+  return updateDialogWindow; // 返回
+}
+
+// 获取更新弹窗窗口（未创建时返回 null）
+export function getUpdateDialogWindow() {
+  if (updateDialogWindow && !updateDialogWindow.isDestroyed()) return updateDialogWindow; // 有效返回
+  return null; // 空
+}
+
+// 向更新弹窗推送内容（确认页/下载进度/完成页/暂不更新告知）
+export function pushUpdateDialog(payload) {
+  const win = getUpdateDialogWindow(); // 弹窗引用
+  if (!win || win.isDestroyed()) return; // 窗口无效直接返回
+  const push = () => { // 实际推送函数（复用）
+    if (!win.isDestroyed()) win.webContents.send(IPC.UPDATE_DIALOG_PUSH, payload); // 推内容
+  };
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', push); // 页面加载中 → 等加载完再推（防内容丢失）
+  else push(); // 已加载直接推
+}
+
+// 关闭更新弹窗
+export function closeUpdateDialog() {
+  const win = getUpdateDialogWindow(); // 弹窗引用
+  if (win && !win.isDestroyed()) win.close(); // 关闭
 }

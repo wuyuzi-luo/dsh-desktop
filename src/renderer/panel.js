@@ -167,49 +167,89 @@ async function refreshAll() {
   renderSkills(); // 技能
   renderMcps(); // MCP
   renderUpdater(); // 更新状态
-  maybeAutoCheckDsh(); // dsh 状态未知/失败时后台补查（不阻塞渲染，完成后自会再刷新）
+  maybeAutoCheckAll(); // 状态未知/失败时后台全量补查（不阻塞渲染，完成后自会再刷新）
 }
 
-// 渲染更新状态（APP 按钮 + dsh 本体按钮）
+// 渲染更新状态（APP 按钮 + dsh 本体按钮，两个按钮常显并各自标明状态）
 function renderUpdater() {
   const u = snapshot?.updater?.app ?? {}; // APP 更新状态
   const d = snapshot?.updater?.dsh ?? {}; // dsh 本体更新状态
-  const map = { // APP 文案表
-    checking: '⏳ 检查中…',
-    available: `⬇ 更新到 v${u.info?.version ?? ''}`, // 有新版：点击即确认下载
-    downloading: `⬇ 下载中 ${u.info?.percent ?? ''}%`,
-    downloaded: '✓ 已下载（点通知安装）',
-    'up-to-date': '✓ 已是最新',
-    error: '↻ 检查更新'
-  };
-  els.btnUpdate.textContent = map[u.status] ?? '↻ 检查更新'; // 按钮文案
-  if (d.status === 'available') { // dsh 有新版：显示更新按钮
-    els.btnDshUpdate.hidden = false; // 显示
-    els.btnDshUpdate.textContent = `⬆ 更新 dsh v${d.current} → v${d.latest}`; // 版本对比文案
-    els.btnDshUpdate.dataset.mode = 'update'; // 点击=执行更新
+  // —— APP 按钮：状态 → 文案 + 点击模式 ——
+  if (u.status === 'available') { // 有新版：点击即下载
+    els.btnUpdate.textContent = `⬇ 桌面端 v${u.info?.version ?? ''}`; // 新版提示
+    els.btnUpdate.dataset.mode = 'update'; // 点击=下载
+  } else if (u.status === 'downloading') { // 下载中（进度由主进程推送状态）
+    els.btnUpdate.textContent = `⏳ 下载中 ${u.info?.percent ?? 0}%`; // 进度
+    els.btnUpdate.dataset.mode = 'none'; // 点击无动作
+  } else if (u.status === 'downloaded') { // 已下载待重启（弹窗已提示）
+    els.btnUpdate.textContent = '✓ 桌面端已下载'; // 状态
+    els.btnUpdate.dataset.mode = 'none'; // 重启走弹窗
+  } else if (u.status === 'up-to-date') { // 已是最新（明确告知，用户要求的"写清楚"）
+    els.btnUpdate.textContent = '✓ 桌面端已是最新'; // 状态
+    els.btnUpdate.dataset.mode = 'check'; // 点击=再查一次
+  } else if (u.status === 'checking') { // 检查中
+    els.btnUpdate.textContent = '⏳ 检查中…'; // 状态
+    els.btnUpdate.dataset.mode = 'none'; // 点击无动作
+  } else { // idle / error：提供检查入口
+    els.btnUpdate.textContent = '↻ 检查更新'; // 入口
+    els.btnUpdate.dataset.mode = 'check'; // 点击=检查
+  }
+  // —— dsh 本体按钮：状态 → 文案 + 点击模式 ——
+  if (d.status === 'available') { // 有新版：点击即 npm 更新
+    els.btnDshUpdate.textContent = `⬆ dsh v${d.latest}`; // 新版提示
+    els.btnDshUpdate.dataset.mode = 'update'; // 点击=更新
   } else if (d.status === 'updating') { // 更新中
-    els.btnDshUpdate.hidden = false; // 显示
-    els.btnDshUpdate.textContent = '⏳ dsh 更新中…'; // 进度文案
+    els.btnDshUpdate.textContent = '⏳ dsh 更新中…'; // 状态
     els.btnDshUpdate.dataset.mode = 'none'; // 点击无动作
-  } else if (d.status === 'error' || d.status === 'idle' || d.status === 'checking') {
-    // 检查失败/尚未检查：也显示入口按钮（旧版这里静默隐藏，导致用户找不到更新入口）
-    els.btnDshUpdate.hidden = false; // 显示
-    els.btnDshUpdate.textContent = '↻ 检查 dsh 本体更新'; // 检查入口文案
+  } else if (d.status === 'up-to-date') { // 已是最新（明确告知）
+    els.btnDshUpdate.textContent = '✓ dsh 已是最新'; // 状态
+    els.btnDshUpdate.dataset.mode = 'check'; // 点击=再查一次
+  } else if (d.status === 'checking') { // 检查中
+    els.btnDshUpdate.textContent = '⏳ 检查 dsh…'; // 状态
+    els.btnDshUpdate.dataset.mode = 'none'; // 点击无动作
+  } else { // idle / error：提供检查入口
+    els.btnDshUpdate.textContent = '↻ 检查 dsh 更新'; // 入口
     els.btnDshUpdate.dataset.mode = 'check'; // 点击=补查
-  } else {
-    els.btnDshUpdate.hidden = true; // 已最新：隐藏保持简洁
   }
 }
 
-// 面板打开时若 dsh 状态未知/失败，后台补查一次（不弹通知，不阻塞首屏渲染）
-let dshAutoChecked = false; // 本面板会话内只自动补查一次，避免反复打扰
-async function maybeAutoCheckDsh() {
-  if (dshAutoChecked) return; // 已补查过
+// 面板打开时自动全量静默检查一次（APP+dsh，不弹窗不通知，结果直接显示在按钮上）
+// 用户要求：一进控制面板就能看到更新按键，不用再按一次"检测更新"
+let autoChecked = false; // 本面板会话内只自动检查一次，避免反复打扰
+async function maybeAutoCheckAll() {
+  if (autoChecked) return; // 已检查过
+  const u = snapshot?.updater?.app ?? {}; // APP 当前状态
   const d = snapshot?.updater?.dsh ?? {}; // dsh 当前状态
-  if (d.status === 'available' || d.status === 'up-to-date' || d.status === 'updating') return; // 已有结果无需补查
-  dshAutoChecked = true; // 置标志（先置防重入）
-  await window.dshDesktop.checkDshUpdate(); // 静默补查（主进程不弹通知）
-  await refreshAll(); // 用补查结果刷新按钮
+  const known = ['available', 'up-to-date', 'downloading', 'updating', 'downloaded']; // 已明确的状态无需补查
+  if (known.includes(u.status) && known.includes(d.status)) return; // 两个都有结果了
+  autoChecked = true; // 置标志（先置防重入）
+  await window.dshDesktop.quietCheckAll(); // 全量静默检查（主进程不弹窗不通知）
+  await refreshAll(); // 用检查结果刷新按钮
+}
+
+// 手动检查完成后向用户告知各组件最新情况（明确区分 APP 与 dsh 各自有无新版）
+function reportCheckResult() {
+  const u = snapshot?.updater?.app ?? {}; // APP 状态
+  const d = snapshot?.updater?.dsh ?? {}; // dsh 状态
+  const appNew = u.status === 'available'; // APP 有新版
+  const dshNew = d.status === 'available'; // dsh 有新版
+  if (!appNew && !dshNew) { // 都没有：明确告知暂无新版本
+    window.dshDesktop.showMessage({ // 系统消息框
+      title: '暂无新版本', // 标题
+      message: `桌面端当前 v${u.info?.version ?? snapshot?.version ?? '-'} 已是最新；dsh 本体当前 v${d.current ?? '-'} 已是最新` // 详细
+    });
+  } else if (!appNew && dshNew) { // 只有 dsh 有
+    window.dshDesktop.showMessage({ // 系统消息框
+      title: '检查结果', // 标题
+      message: `桌面端暂无新版本（已是最新）；dsh 本体有新版本 v${d.latest}，点击下方「dsh」按钮即可更新` // 详细
+    });
+  } else if (appNew && !dshNew) { // 只有 APP 有
+    window.dshDesktop.showMessage({ // 系统消息框
+      title: '检查结果', // 标题
+      message: `dsh 本体暂无新版本（已是最新）；桌面端有新版本 v${u.info?.version}，点击下方「桌面端」按钮即可更新` // 详细
+    });
+  }
+  // 两个都有新版时不弹窗打扰（两个按钮都已变为更新态，一目了然）
 }
 
 // 左侧导航切换
@@ -229,27 +269,36 @@ els.btnRestart.addEventListener('click', async () => { // 重启服务
   await window.dshDesktop.restartService(); // 调主进程
   setTimeout(refreshAll, 2500); // 稍后刷新状态
 });
-els.btnUpdate.addEventListener('click', async () => { // 检查/确认更新
-  const u = snapshot?.updater?.app ?? {}; // 当前 APP 更新状态
-  if (u.status === 'available') { // 有新版 → 用户确认下载
+els.btnUpdate.addEventListener('click', async () => { // APP 更新按钮：按状态分流
+  const mode = els.btnUpdate.dataset.mode; // 当前按钮模式
+  if (mode === 'update') { // 有新版 → 下载安装包（完成后主进程弹"请重启桌面端"弹窗）
     els.btnUpdate.textContent = '⏳ 下载中…'; // 反馈
-    await window.dshDesktop.downloadUpdate(); // 下载（完成后状态已落盘）
-  } else { // 否则执行检查（APP + dsh 本体）
+    await window.dshDesktop.downloadUpdate(); // 下载（进度/完成弹窗由主进程驱动）
+  } else if (mode === 'check') { // 无结果/失败 → 手动检查（APP+dsh 一起查）
     els.btnUpdate.textContent = '⏳ 检查中…'; // 反馈
     await window.dshDesktop.checkUpdate(); // 检查（主进程已并行查完两者才返回）
+    await refreshAll(); // 用结果刷新按钮
+    reportCheckResult(); // 向用户告知：谁有新版/谁暂无（明确区分 APP 与 dsh）
   }
-  await refreshAll(); // 立即刷新（旧版固定 2s 可能早于 npm view 完成，导致看不到结果）
 });
 els.btnDshUpdate.addEventListener('click', async () => { // dsh 本体按钮：按状态分流
   const mode = els.btnDshUpdate.dataset.mode; // 当前按钮模式
-  if (mode === 'update') { // 有新版 → 执行更新
+  if (mode === 'update') { // 有新版 → npm 更新（主进程弹"正在更新/已完成"弹窗并重启服务）
     els.btnDshUpdate.textContent = '⏳ dsh 更新中…'; // 反馈
     await window.dshDesktop.updateDsh(); // npm 更新 + 重启服务
     await refreshAll(); // 更新完成后刷新
-  } else if (mode === 'check') { // 失败/未知 → 补查
+  } else if (mode === 'check') { // 无结果/失败 → 补查并告知
     els.btnDshUpdate.textContent = '⏳ 检查中…'; // 反馈
-    await window.dshDesktop.checkDshUpdate(); // 静默补查
+    await window.dshDesktop.checkDshUpdate(); // 静默补查（不弹通知）
     await refreshAll(); // 用结果刷新
+    const d = snapshot?.updater?.dsh ?? {}; // 补查后的 dsh 状态
+    if (d.status === 'up-to-date') { // 已最新：明确告知（用户要求写清楚）
+      window.dshDesktop.showMessage({ // 系统消息框
+        title: '暂无新版本', // 标题
+        message: `dsh 本体当前 v${d.current ?? '-'} 已是最新` // 详细
+      });
+    }
+    // 有新版本时不弹（按钮已变为"⬆ dsh vX"更新态，一目了然）
   }
 });
 els.btnOpenGuide.addEventListener('click', () => window.dshDesktop.openGuide()); // 主窗口打开完整使用说明
