@@ -35,7 +35,6 @@ const IPC = {
   UPDATER_CHECK: 'updater:check', // 检查更新
   UPDATER_DOWNLOAD: 'updater:download', // 确认下载 APP 更新
   UPDATER_DSH_UPDATE: 'updater:dsh-update', // 确认更新 dsh
-  UPDATER_DSH_CHECK: 'updater:dsh-check', // 静默补查 dsh（不弹通知）
   UPDATER_QUIET_CHECK_ALL: 'updater:quiet-check-all', // 面板打开全量静默检查
   UPDATE_DIALOG_PUSH: 'update-dialog:push', // 更新弹窗内容推送（主→弹窗页）
   UPDATE_DIALOG_ACTION: 'update-dialog:action', // 更新弹窗按钮动作（弹窗页→主）
@@ -95,10 +94,9 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   listImportableMcps: () => ipcRenderer.invoke(IPC.MCP_IMPORT), // 可导入列表
   adoptMcp: (external) => ipcRenderer.invoke(IPC.MCP_ADOPT, external), // 收编
   // —— 更新 ——
-  checkUpdate: () => ipcRenderer.invoke(IPC.UPDATER_CHECK), // 检查（APP + dsh）
+  checkUpdate: () => ipcRenderer.invoke(IPC.UPDATER_CHECK), // 检查（APP + dsh，有新版弹确认弹窗）
   downloadUpdate: () => ipcRenderer.invoke(IPC.UPDATER_DOWNLOAD), // 确认下载 APP 更新
   updateDsh: () => ipcRenderer.invoke(IPC.UPDATER_DSH_UPDATE), // 确认更新 dsh
-  checkDshUpdate: () => ipcRenderer.invoke(IPC.UPDATER_DSH_CHECK), // 静默补查 dsh（不弹通知）
   quietCheckAll: () => ipcRenderer.invoke(IPC.UPDATER_QUIET_CHECK_ALL), // 面板打开全量静默检查（APP+dsh）
   // 更新弹窗：按钮动作回传（update/later/restart/done）
   updateDialogAction: (action) => ipcRenderer.invoke(IPC.UPDATE_DIALOG_ACTION, action),

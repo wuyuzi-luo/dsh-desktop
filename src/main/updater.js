@@ -9,7 +9,7 @@ import { join } from 'node:path'; // 路径拼接
 import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 文件写出/读取
 import { spawn, exec } from 'node:child_process'; // npm 更新 dsh 用
 import { promisify } from 'node:util'; // 回调转 Promise
-import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog } from './window.js'; // 主窗口引用 + 更新弹窗
+import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler } from './window.js'; // 主窗口引用 + 更新弹窗
 import { getConfig } from './config.js'; // 配置读取
 
 // 用户网络环境（MITM 代理/杀软证书劫持）下 undici fetch 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE，
@@ -29,9 +29,10 @@ let dshState = { status: 'idle', current: null, latest: null }; // idle | checki
 let openPanelFn = null; // 打开控制面板（通知点击用）
 let restartServiceFn = null; // 重启 dsh 服务（本体更新后用）
 let updatingDsh = false; // dsh 更新防重入标志
-let appDialogShown = false; // APP 确认弹窗本次进程只弹一次
-let dshDialogShown = false; // dsh 确认弹窗本次进程只弹一次
+let appDialogShown = false; // APP 确认弹窗本次进程只弹一次（手动检查强制弹时不受限）
+let dshDialogShown = false; // dsh 确认弹窗本次进程只弹一次（手动检查强制弹时不受限）
 let dialogType = null; // 弹窗当前对应的组件类型（app | dsh）
+let dialogQueue = []; // 待弹弹窗队列（APP 与 dsh 同时有新版时依次弹，避免覆盖）
 
 // 推送全部更新状态给面板（面板若开着）
 function pushState() {
@@ -72,10 +73,27 @@ function showDialog(payload) {
 }
 
 // 弹"发现新版本"确认弹窗（组件名 + 版本对比 + 更新内容 + 更新/暂不更新按钮）
+// 入队方式弹出：APP 与 dsh 同时有新版时先弹 APP，用户处理完后自动弹 dsh（不互相覆盖）
 function showConfirmDialog(type, label, current, latest, notes) {
-  dialogType = type; // 记录弹窗组件类型（按钮"立即更新"时决定执行哪条更新链路）
-  showDialog({ phase: 'confirm', type, label, current, latest, notes: notes || '' }); // 推送确认页
+  enqueueDialog({ phase: 'confirm', type, label, current, latest, notes: notes || '' }); // 入队确认页
 }
+
+// 弹窗队列：入队；当前无弹窗时立即弹（有则等当前弹窗关闭后由 onDialogClosed 接续）
+function enqueueDialog(payload) {
+  dialogQueue.push(payload); // 入队
+  if (dialogQueue.length === 1) showNextDialog(); // 队列只有自己 → 立即弹
+}
+
+// 弹出队列中的下一个弹窗（payload 里带 type，"立即更新"按钮据此选择更新链路）
+function showNextDialog() {
+  const payload = dialogQueue.shift(); // 出队
+  if (!payload) return; // 队列空
+  dialogType = payload.type ?? null; // 记录当前弹窗的组件类型
+  showDialog(payload); // 弹窗
+}
+
+// 弹窗窗口关闭回调：继续弹队列中的下一个（window.js closed 事件注入）
+setUpdateDialogClosedHandler(() => showNextDialog()); // 注册
 
 // —— APP 更新：检测 + 弹窗/通知提示，下载由用户确认后触发 ——
 // 参数：popup=检测到新版弹应用内弹窗；notify=弹系统通知（面板静默补查时两者都关）
@@ -98,7 +116,7 @@ export async function checkForUpdates({ popup = true, notify = true } = {}) {
     const asset = (release.assets ?? []).find((a) => String(a.name).endsWith('.exe')); // 找安装包资源
     if (!asset) throw new Error('no exe asset'); // 无安装包
     setApp('available', { version: remote, url: asset.browser_download_url, notes: String(release?.body ?? '') }); // 有新版（带上更新说明）
-    if (popup && !appDialogShown) { // 启动检测时弹应用内弹窗（本次进程只弹一次）
+    if (popup && (popup === 'force' || !appDialogShown)) { // 弹应用内弹窗：force=手动检查必弹；true=启动只弹一次
       appDialogShown = true; // 置标志
       showConfirmDialog('app', 'dsh 桌面端', app.getVersion(), remote, release?.body); // 确认弹窗
     }
@@ -196,7 +214,7 @@ export async function checkDshUpdate({ popup = true, notify = true } = {}) {
     }
     const notes = await getDshReleaseNotes(latest); // 官方 release 更新说明（拿不到为 null）
     setDsh('available', { current, latest, notes }); // 有新版本（带上更新说明）
-    if (popup && !dshDialogShown) { // 启动检测时弹应用内弹窗（本次进程只弹一次）
+    if (popup && (popup === 'force' || !dshDialogShown)) { // 弹应用内弹窗：force=手动检查必弹；true=启动只弹一次
       dshDialogShown = true; // 置标志
       showConfirmDialog('dsh', 'dsh 本体', current, latest, notes); // 确认弹窗
     }
@@ -270,15 +288,17 @@ export function createUpdater(deps = {}) {
   restartServiceFn = deps.restartService ?? null; // 服务重启回调
   return {
     silentCheck: () => checkForUpdates({ popup: true, notify: true }), // 启动自动检查 APP（弹窗+通知）
-    manualCheck: () => checkForUpdates({ popup: false, notify: true }), // 面板手动检查 APP（仅通知，结果按钮显示）
     quietAppCheck: () => checkForUpdates({ popup: false, notify: false }), // 面板打开后台补查 APP（全静默）
     download: downloadUpdate, // 用户确认下载 APP 更新
     silentDshCheck: () => checkDshUpdate({ popup: true, notify: true }), // 启动自动检查 dsh（弹窗+通知）
-    manualDshCheck: () => checkDshUpdate({ popup: false, notify: true }), // 面板手动检查 dsh（仅通知）
     quietDshCheck: () => checkDshUpdate({ popup: false, notify: false }), // 面板打开后台补查 dsh（全静默）
     quietCheckAll: () => Promise.all([ // 面板打开全量静默检查（APP+dsh 并行，不弹窗不通知）
       checkForUpdates({ popup: false, notify: false }),
       checkDshUpdate({ popup: false, notify: false })
+    ]),
+    manualCheckAll: () => Promise.all([ // 面板"检查更新"：APP+dsh 一起查，有新版必弹确认弹窗（与启动弹窗一致）
+      checkForUpdates({ popup: 'force', notify: false }),
+      checkDshUpdate({ popup: 'force', notify: false })
     ]),
     updateDsh, // 用户确认更新 dsh
     dialogUpdate, // 弹窗"立即更新"

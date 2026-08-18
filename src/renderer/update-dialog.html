@@ -8,15 +8,15 @@
 </head>
 <body>
   <div class="dialog">
-    <!-- 顶部：徽标 + 标题 + 关闭按钮 -->
+    <!-- 顶部标题栏：可拖动 -->
     <header class="head">
-      <span class="badge" id="badge">dsh 桌面端</span>
+      <span class="title" id="headTitle">更新提示</span>
       <button class="iconbtn" id="btnClose" title="关闭">✕</button>
     </header>
 
-    <!-- 确认页：检测到新版本 -->
+    <!-- 确认页：检测到新版本（左对齐排版 + 可滚动更新内容） -->
     <section id="view-confirm" class="view" hidden>
-      <div class="title" id="confirmTitle">已检测到新版本</div>
+      <div class="title-main" id="confirmTitle">已检测到新版本</div>
       <div class="versions">
         <span class="ver-old" id="verCurrent"></span>
         <span class="arrow">→</span>
@@ -24,68 +24,58 @@
       </div>
       <div class="notes-label">更新内容</div>
       <div class="notes" id="notes"></div>
-      <div class="actions">
-        <button class="btn ghost" id="btnLater">暂不更新</button>
-        <button class="btn primary" id="btnUpdate">立即更新</button>
-      </div>
     </section>
 
     <!-- 下载中：APP 安装包下载进度 -->
-    <section id="view-downloading" class="view" hidden>
+    <section id="view-downloading" class="view center" hidden>
       <div class="spinner"></div>
-      <div class="title">正在下载新版本…</div>
+      <div class="title-main">正在下载新版本…</div>
       <div class="progress"><div class="bar" id="dlBar"></div></div>
       <div class="percent" id="dlPercent">0%</div>
-      <div class="hint">下载完成后将提示重启桌面端</div>
+      <div class="hint" style="text-align:center">下载完成后将提示重启桌面端</div>
     </section>
 
     <!-- 更新中：dsh 本体 npm 安装 -->
-    <section id="view-updating" class="view" hidden>
+    <section id="view-updating" class="view center" hidden>
       <div class="spinner"></div>
-      <div class="title">正在更新 dsh 本体…</div>
-      <div class="hint">需要几分钟时间，请保持网络畅通</div>
+      <div class="title-main">正在更新 dsh 本体…</div>
+      <div class="hint" style="text-align:center">需要几分钟时间，请保持网络畅通</div>
     </section>
 
     <!-- APP 更新完成：请重启桌面端 -->
-    <section id="view-app-done" class="view" hidden>
+    <section id="view-app-done" class="view center" hidden>
       <div class="bigicon">✅</div>
-      <div class="title">已更新完成，请重启桌面端</div>
-      <div class="hint" id="appDoneVer"></div>
-      <div class="actions">
-        <button class="btn ghost" id="btnLaterRestart">稍后</button>
-        <button class="btn primary" id="btnRestart">立即重启</button>
-      </div>
+      <div class="title-main">已更新完成，请重启桌面端</div>
+      <div class="hint" id="appDoneVer" style="text-align:center"></div>
     </section>
 
     <!-- dsh 本体更新完成 -->
-    <section id="view-dsh-done" class="view" hidden>
+    <section id="view-dsh-done" class="view center" hidden>
       <div class="bigicon">✅</div>
-      <div class="title">dsh 本体已更新完成</div>
-      <div class="hint" id="dshDoneVer"></div>
-      <div class="actions">
-        <button class="btn primary" id="btnDone">完成</button>
-      </div>
+      <div class="title-main">dsh 本体已更新完成</div>
+      <div class="hint" id="dshDoneVer" style="text-align:center"></div>
     </section>
 
     <!-- 暂不更新告知页 -->
-    <section id="view-deferred" class="view" hidden>
+    <section id="view-deferred" class="view center" hidden>
       <div class="bigicon">💡</div>
-      <div class="title">已为您保留当前版本</div>
-      <div class="hint">如需更新，可随时打开控制面板（Ctrl+Shift+D）进行更新</div>
-      <div class="actions">
-        <button class="btn primary" id="btnGotIt">知道了</button>
-      </div>
+      <div class="title-main">已为您保留当前版本</div>
+      <div class="hint" style="text-align:center">如需更新，可随时打开控制面板（Ctrl+Shift+D）点击「检查更新」进行更新</div>
     </section>
 
     <!-- 下载/更新失败页 -->
-    <section id="view-error" class="view" hidden>
+    <section id="view-error" class="view center" hidden>
       <div class="bigicon">⚠️</div>
-      <div class="title" id="errorTitle">更新失败</div>
-      <div class="hint">请检查网络后稍后重试，或打开控制面板（Ctrl+Shift+D）重新更新</div>
-      <div class="actions">
-        <button class="btn primary" id="btnErrDone">知道了</button>
-      </div>
+      <div class="title-main" id="errorTitle">更新失败</div>
+      <div class="hint" style="text-align:center">请检查网络后稍后重试，或打开控制面板（Ctrl+Shift+D）重新更新</div>
     </section>
+
+    <!-- 底部按钮行：右对齐 -->
+    <footer class="actions" id="actions">
+      <button class="btn" id="btnLater" hidden>暂不更新</button>
+      <button class="btn" id="btnLaterRestart" hidden>稍后</button>
+      <button class="btn primary" id="btnUpdate">立即更新</button>
+    </footer>
   </div>
 
   <script src="update-dialog.js"></script>

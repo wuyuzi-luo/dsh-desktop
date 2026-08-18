@@ -16,6 +16,7 @@ const ICON_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 
 let mainWindow = null; // 主窗口单例
 let panelWindow = null; // 面板窗口单例
 let updateDialogWindow = null; // 更新弹窗窗口单例
+let onUpdateDialogClosed = null; // 弹窗关闭回调（updater 注入：继续弹队列中的下一个）
 
 // 创建主窗口（启动时加载本地 boot.html；服务就绪后切到 dsh Web UI）
 export function createMainWindow() {
@@ -130,8 +131,13 @@ export function createUpdateDialogWindow() {
   });
   updateDialogWindow.once('ready-to-show', () => updateDialogWindow.show()); // 就绪显示
   updateDialogWindow.loadFile(join(RENDERER_DIR, 'update-dialog.html')); // 加载弹窗页
-  updateDialogWindow.on('closed', () => { updateDialogWindow = null; }); // 关闭时清引用
+  updateDialogWindow.on('closed', () => { updateDialogWindow = null; onUpdateDialogClosed?.(); }); // 关闭时清引用并通知（弹队列下一个）
   return updateDialogWindow; // 返回
+}
+
+// 注册弹窗关闭回调（updater 模块加载时调用：队列中还有待弹组件则接续弹）
+export function setUpdateDialogClosedHandler(fn) {
+  onUpdateDialogClosed = fn; // 保存回调
 }
 
 // 获取更新弹窗窗口（未创建时返回 null）

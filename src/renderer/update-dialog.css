@@ -1,84 +1,74 @@
-/* 更新弹窗样式：dsh 深色风格圆角卡片，无边框窗口内自绘 */
+/* 更新弹窗样式：参考 dsh 官方设置页风格（深色 #0f1319 底、卡片 #161b22、强调 #4a6cf7） */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
   width: 100%;
   height: 100%;
-  background: transparent; /* 窗口底色由外层圆角卡片提供 */
+  background: #0f1319; /* 整窗深色底（与 dsh 设置页一致） */
   font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
   overflow: hidden;
 }
 
 .dialog {
-  margin: 10px; /* 与窗口边缘留白形成圆角视觉 */
-  height: calc(100% - 20px);
-  background: #161b22; /* 卡片底色（与面板一致） */
-  border: 1px solid #30363d; /* 边框 */
-  border-radius: 12px; /* 圆角 */
+  height: 100%;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55); /* 投影 */
-  -webkit-app-region: drag; /* 整卡可拖动 */
 }
 
+/* 顶部标题栏：可拖动窗口区域 */
 .head {
+  -webkit-app-region: drag; /* 拖动窗口 */
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid #30363d; /* 分隔线 */
 }
-
-.badge {
-  background: #1c2733; /* 徽标底色 */
-  color: #8b949e; /* 徽标文字 */
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid #30363d;
-}
+.head .title { font-size: 12.5px; font-weight: 600; color: #8b949e; letter-spacing: 0.5px; } /* 小标题 */
 
 .iconbtn {
-  -webkit-app-region: no-drag; /* 按钮区不参与拖动 */
+  -webkit-app-region: no-drag; /* 按钮不参与拖动 */
   background: transparent;
   border: none;
   color: #8b949e;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 3px 7px;
   border-radius: 6px;
 }
 .iconbtn:hover { background: #21262d; color: #e6edf3; } /* 悬停反馈 */
 
+/* 内容视图：占满剩余空间，垂直排布 */
 .view {
   flex: 1;
+  min-height: 0; /* 允许子元素收缩（保证 notes 区域能正确滚动） */
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 26px 20px;
-  text-align: center;
-  gap: 10px;
+  padding: 16px 20px 14px;
+  gap: 9px;
 }
 .view[hidden] { display: none; } /* 显式覆盖 display:flex */
+.view.center { align-items: center; justify-content: center; text-align: center; } /* 居中变体（进度/完成页） */
 
-.title { font-size: 17px; font-weight: 600; color: #e6edf3; } /* 主标题 */
+.title-main { font-size: 16px; font-weight: 600; color: #e6edf3; } /* 主标题 */
 
 .versions {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 2px 0;
+  gap: 10px;
 }
-.ver-old { color: #8b949e; font-size: 14px; text-decoration: line-through; } /* 旧版本划线 */
-.ver-new { color: #58a6ff; font-size: 15px; font-weight: 600; } /* 新版本高亮 */
+.ver-old { color: #8b949e; font-size: 13px; text-decoration: line-through; } /* 旧版本划线 */
+.ver-new { color: #58a6ff; font-size: 14px; font-weight: 600; } /* 新版本高亮 */
 .arrow { color: #8b949e; }
 
-.notes-label { color: #8b949e; font-size: 12px; align-self: flex-start; margin-top: 4px; }
+.notes-label { color: #8b949e; font-size: 12px; } /* "更新内容"标签 */
+
 .notes {
-  width: 100%;
-  max-height: 130px; /* 更新内容过长滚动 */
-  overflow-y: auto;
-  background: #0f1319;
+  flex: 1; /* 占满剩余空间 */
+  min-height: 60px; /* 最短高度 */
+  overflow-y: auto; /* 内容过长可滚动（滚轮） */
+  -webkit-app-region: no-drag; /* 关键：脱离拖拽区，否则滚轮不生效 */
+  background: #161b22; /* 内容卡片 */
   border: 1px solid #30363d;
   border-radius: 8px;
   padding: 10px 12px;
@@ -90,10 +80,13 @@ html, body {
   word-break: break-word;
 }
 .notes:empty::before { content: '暂无详细更新说明'; color: #8b949e; } /* 空内容占位 */
+.notes::-webkit-scrollbar { width: 8px; } /* 细滚动条 */
+.notes::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; } /* 滚动条滑块 */
+.notes::-webkit-scrollbar-thumb:hover { background: #3f4756; } /* 滑块悬停 */
 
-.hint { color: #8b949e; font-size: 13px; line-height: 1.6; } /* 辅助说明 */
+.hint { color: #8b949e; font-size: 12.5px; line-height: 1.7; text-align: left; } /* 辅助说明 */
 
-.bigicon { font-size: 40px; } /* 完成页大图标 */
+.bigicon { font-size: 36px; } /* 完成页大图标 */
 
 /* 下载进度条 */
 .progress {
@@ -123,29 +116,30 @@ html, body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* 底部按钮行：右对齐（与 dsh 设置页操作区一致） */
 .actions {
-  -webkit-app-region: no-drag; /* 按钮区不参与拖动 */
+  -webkit-app-region: no-drag; /* 按钮不参与拖动 */
   display: flex;
-  gap: 12px;
-  margin-top: 8px;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 20px 14px;
+  border-top: 1px solid #30363d; /* 分隔线 */
 }
 
 .btn {
   border: 1px solid #30363d;
   border-radius: 8px;
-  padding: 8px 26px;
-  font-size: 13.5px;
+  padding: 7px 22px;
+  font-size: 13px;
   cursor: pointer;
-  background: #21262d;
-  color: #c9d1d9;
+  background: #1c212c; /* 次级按钮卡片色 */
+  color: #e6edf3;
   transition: background 0.15s;
 }
-.btn:hover { background: #30363d; } /* 悬停 */
+.btn:hover { background: #2d3548; } /* 悬停 */
 .btn.primary {
   background: #4a6cf7; /* 主按钮强调色 */
   border-color: #4a6cf7;
   color: #fff;
 }
 .btn.primary:hover { background: #5a7bf8; } /* 主按钮悬停 */
-.btn.ghost { background: transparent; } /* 次级按钮透明底 */
-.btn.ghost:hover { background: #21262d; }
