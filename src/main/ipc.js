@@ -31,7 +31,10 @@ async function checkNodeVersion() {
 
 // 组装面板状态快照（面板打开/刷新时拉取一次全量）
 export async function buildStateSnapshot(deps) {
-  const { supervisor, updater } = deps; // 依赖解构
+  const { supervisor } = deps; // 依赖解构
+  // 注意：deps 里注入的是 getUpdater() 延迟取用函数而不是 updater 对象本身
+  // （旧代码误写 deps.updater 恒为 undefined → 面板更新状态恒空 → 出现"弹窗说新版、面板报检查失败"的矛盾）
+  const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取更新器
   const svc = supervisor ? supervisor.getStatus() : { state: 'stopped' }; // 服务状态
   const [workspaces, skills, mcps] = await Promise.all([ // 并行拉取三类列表
     loadWorkspaces(), // 工作区
