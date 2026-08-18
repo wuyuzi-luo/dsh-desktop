@@ -84,6 +84,15 @@ html, body {
 .notes::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; } /* 滚动条滑块 */
 .notes::-webkit-scrollbar-thumb:hover { background: #3f4756; } /* 滑块悬停 */
 
+/* 更新内容 Markdown 排版样式（标题/列表/引用/行内代码） */
+.notes .md-h1 { font-size: 15px; font-weight: 700; color: #e6edf3; margin: 6px 0 3px; } /* 一级标题 */
+.notes .md-h2 { font-size: 14px; font-weight: 700; color: #e6edf3; margin: 6px 0 3px; } /* 二级标题 */
+.notes .md-h3 { font-size: 13px; font-weight: 600; color: #e6edf3; margin: 6px 0 3px; } /* 三级标题 */
+.notes .md-li { margin: 2px 0; padding-left: 4px; } /* 列表项（• 前缀） */
+.notes .md-quote { color: #8b949e; border-left: 3px solid #30363d; padding-left: 8px; margin: 4px 0; } /* 引用块 */
+.notes code { background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 0 5px; font-size: 11.5px; } /* 行内代码 */
+.notes b { color: #e6edf3; } /* 加粗 */
+
 .hint { color: #8b949e; font-size: 12.5px; line-height: 1.7; text-align: left; } /* 辅助说明 */
 
 .bigicon { font-size: 36px; } /* 完成页大图标 */

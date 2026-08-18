@@ -232,8 +232,9 @@ function reportCheckResult() {
   } else { // dsh 检查失败（网络原因，之前把失败误显示成"已是最新"）
     lines.push('dsh 本体更新检查失败，请检查网络后重试'); // 失败提示行
   }
+  const bothOk = u.status === 'up-to-date' && d.status === 'up-to-date'; // 两个组件都查成功且已最新
   window.dshDesktop.showMessage({ // 系统消息框
-    title: '暂无新版本', // 主文案（粗体）
+    title: bothOk ? '暂无新版本' : '检查未完成', // 有检查失败时不谎报"暂无新版本"
     message: lines.join('\n\n') // 详情多行（空行分隔，左对齐）
   });
 }

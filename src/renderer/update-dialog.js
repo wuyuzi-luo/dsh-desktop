@@ -47,6 +47,30 @@ function renderActions(phase) {
   // 下载中/更新中：无按钮（进度由主进程自动接续）
 }
 
+// HTML 转义（防注入：更新内容来自外部 release body，必须先转义）
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 简单 Markdown → HTML：先整体转义再按行转换（仅支持 标题/列表/引用/加粗/链接文字化，防 XSS）
+// 官方 release 说明是 Markdown 源码（### 标题、* 列表、[中文](#cn) 锚点等），原样显示很难看
+function markdownToHtml(md) {
+  let html = escapeHtml(md); // 先全部转义（所有标签失效，仅剩纯文本）
+  html = html.replace(/\[([^\]]+)\]\(#[^)]*\)/g, '$1'); // 锚点链接 [中文](#cn) → 只留文字
+  html = html.replace(/\[([^\]]+)\]\((https?:[^)]*)\)/g, '$1（$2）'); // 外链 → "文字（URL）"形式（弹窗内不跳转）
+  html = html.split('\n').map((line) => { // 逐行转换块级元素
+    if (/^###\s+/.test(line)) return `<div class="md-h3">${line.replace(/^###\s+/, '')}</div>`; // 三级标题
+    if (/^##\s+/.test(line)) return `<div class="md-h2">${line.replace(/^##\s+/, '')}</div>`; // 二级标题
+    if (/^#\s+/.test(line)) return `<div class="md-h1">${line.replace(/^#\s+/, '')}</div>`; // 一级标题
+    if (/^\s*[-*]\s+/.test(line)) return `<div class="md-li">• ${line.replace(/^\s*[-*]\s+/, '')}</div>`; // 列表项
+    if (/^&gt;\s?/.test(line)) return `<div class="md-quote">${line.replace(/^&gt;\s?/, '')}</div>`; // 引用行（转义后 &gt;）
+    return line; // 普通行原样
+  }).join('\n');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>'); // 行内加粗 **x**
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>'); // 行内代码 `x`
+  return html;
+}
+
 // 处理主进程推送的弹窗内容
 function render(payload) {
   const phase = payload?.phase ?? 'confirm'; // 目标视图
@@ -57,7 +81,7 @@ function render(payload) {
     document.getElementById('confirmTitle').textContent = `已检测到 ${payload.label ?? ''} 有新版本`; // 主标题
     document.getElementById('verCurrent').textContent = '当前 v' + (payload.current ?? '-'); // 当前版本
     document.getElementById('verLatest').textContent = '新版本 v' + (payload.latest ?? '-'); // 新版本
-    document.getElementById('notes').textContent = payload.notes ?? ''; // 更新内容
+    document.getElementById('notes').innerHTML = markdownToHtml(payload.notes ?? ''); // 更新内容（Markdown 转排版）
   } else if (phase === 'downloading') { // 下载进度
     document.getElementById('dlBar').style.width = (payload.percent ?? 0) + '%'; // 进度条
     document.getElementById('dlPercent').textContent = (payload.percent ?? 0) + '%'; // 百分比

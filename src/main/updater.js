@@ -57,6 +57,15 @@ function compareVersions(a, b) {
   return 0; // 相同
 }
 
+// 检查串行队列：面板自动补查与手动检查可能并发，若交错执行会旧结果覆盖新结果
+// （曾出现"弹窗说检测到新版、消息框却说检查失败"的矛盾）。串行化保证按触发顺序依次执行。
+let checkChain = Promise.resolve(); // 串行链（初始已就绪）
+function serialize(fn) {
+  const run = checkChain.then(fn, fn); // 无论上一个成败都执行本次
+  checkChain = run.then(() => {}, () => {}); // 链条吞掉错误继续排下一个
+  return run; // 返回本次执行结果（调用方 await 得到的就是本次的最终状态）
+}
+
 // 弹"新版本可用"系统通知：点击打开控制面板（后台提醒，防用户手快关掉弹窗）
 function notifyAvailable(title, body) {
   try {
@@ -97,7 +106,10 @@ setUpdateDialogClosedHandler(() => showNextDialog()); // 注册
 
 // —— APP 更新：检测 + 弹窗/通知提示，下载由用户确认后触发 ——
 // 参数：popup=检测到新版弹应用内弹窗；notify=弹系统通知（面板静默补查时两者都关）
-export async function checkForUpdates({ popup = true, notify = true } = {}) {
+export function checkForUpdates(opts = {}) {
+  return serialize(() => doCheckForUpdates(opts)); // 串行化防并发交错（详见 serialize 注释）
+}
+async function doCheckForUpdates({ popup = true, notify = true } = {}) {
   setApp('checking'); // 检查中
   try {
     // 查 GitHub Releases 最新版元信息
@@ -200,7 +212,10 @@ async function getDshReleaseNotes(version) {
 
 // 检测 dsh 本体更新（失败不打扰，仅记状态）
 // 参数：popup=发现新版弹应用内弹窗；notify=弹系统通知（面板静默补查时两者都关）
-export async function checkDshUpdate({ popup = true, notify = true } = {}) {
+export function checkDshUpdate(opts = {}) {
+  return serialize(() => doCheckDshUpdate(opts)); // 串行化防并发交错（详见 serialize 注释）
+}
+async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
   const current = await getLocalDshVersion(); // 本机版本
   setDsh('checking', { current }); // 检查中
   if (!current) { setDsh('error', { message: '未检测到 dsh 安装' }); return dshState; } // 无本机版本
