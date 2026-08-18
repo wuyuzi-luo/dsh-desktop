@@ -26,6 +26,7 @@ let dshState = { status: 'idle', current: null, latest: null }; // idle | checki
 // 依赖回调（index.js 注入）
 let openPanelFn = null; // 打开控制面板（通知点击用）
 let restartServiceFn = null; // 重启 dsh 服务（本体更新后用）
+let stopServiceFn = null; // 停止 dsh 服务（本体更新前用，防替换运行中文件）
 let updatingDsh = false; // dsh 更新防重入标志
 let appDialogShown = false; // APP 确认弹窗本次进程只弹一次（手动检查强制弹时不受限）
 let dshDialogShown = false; // dsh 确认弹窗本次进程只弹一次（手动检查强制弹时不受限）
@@ -265,6 +266,7 @@ export async function updateDsh() {
   if (updatingDsh) return dshState; // 防重入
   updatingDsh = true; // 置标志
   setDsh('updating', { current: dshState.current, latest }); // 更新中
+  await stopServiceFn?.(); // 更新前先停服务：避免 npm 替换运行中文件导致服务崩溃（装完会自动重启）
   // 进度驱动：npm install 没有真实百分比输出，用"起始 5% + 输出行/心跳逐步上涨"模拟
   // 让用户明确感知更新在推进（封顶 88%，收到 added/changed 行跳到 92%，完成直接进完成页）
   let percent = 5; // 起始进度（正在连接 npm 源）
@@ -356,6 +358,7 @@ export async function dialogRestart() {
 export function createUpdater(deps = {}) {
   openPanelFn = deps.openPanel ?? null; // 面板打开回调
   restartServiceFn = deps.restartService ?? null; // 服务重启回调
+  stopServiceFn = deps.stopService ?? null; // 服务停止回调（更新前用）
   return {
     silentCheck: () => checkForUpdates({ popup: true, notify: true }), // 启动自动检查 APP（弹窗+通知）
     quietAppCheck: () => checkForUpdates({ popup: false, notify: false }), // 面板打开后台补查 APP（全静默）

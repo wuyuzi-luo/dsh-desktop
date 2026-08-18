@@ -146,7 +146,8 @@ if (!gotLock) {
     // 7. 更新器（启动自动检查 APP 与 dsh 本体；发现新版仅提示，用户确认后才下载/安装）
     updater = createUpdater({ // 建更新器（注入回调）
       openPanel, // 通知点击 → 打开控制面板
-      restartService: () => supervisor?.restart() // dsh 本体更新完成后重启服务
+      restartService: () => supervisor?.restart(), // dsh 本体更新完成后重启服务
+      stopService: () => supervisor?.stop() // dsh 本体更新前先停服务（避免替换运行中文件导致服务崩溃）
     });
     if (app.isPackaged) { // 打包版才自动检查（dev 模式跳过避免噪音）
       updater.silentCheck(); // APP 更新检查
