@@ -247,7 +247,15 @@ export async function updateDsh() {
   if (updatingDsh) return dshState; // 防重入
   updatingDsh = true; // 置标志
   setDsh('updating', { current: dshState.current, latest }); // 更新中
-  showDialog({ phase: 'updating' }); // 弹窗切到"正在更新"页
+  // 进度驱动：npm install 没有真实百分比输出，用"起始 5% + 输出行/心跳逐步上涨"模拟
+  // 让用户明确感知更新在推进（封顶 88%，收到 added/changed 行跳到 92%，完成直接进完成页）
+  let percent = 5; // 起始进度（正在连接 npm 源）
+  const bump = (n) => { // 上涨进度并推送弹窗
+    percent = Math.min(88, percent + n); // 封顶 88%（最后 12% 留给安装收尾）
+    showDialog({ phase: 'updating', percent }); // 推送进度
+  };
+  showDialog({ phase: 'updating', percent }); // 弹窗切到"正在更新"页（5%）
+  const heartbeat = setInterval(() => bump(2), 4000); // 心跳：每 4 秒 +2%（无输出时也保证进度前进）
   try {
     const dir = getConfig('dshDir'); // 安装目录
     const child = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit'], {
@@ -255,6 +263,18 @@ export async function updateDsh() {
       shell: true, // Windows npm.cmd 解析
       windowsHide: true // 不弹黑窗
     });
+    const feed = (chunk) => { // 处理 npm 输出行：推动进度 + 识别接近完成的行
+      for (const line of chunk.toString('utf8').split(/\r?\n/)) { // 逐行
+        if (!line.trim()) continue; // 空行跳过
+        bump(2); // 每个输出行 +2%（下载/安装过程有输出即前进）
+        if (/added\s+\d+|changed\s+\d+|audited\s+\d+|removed\s+\d+/.test(line)) { // 接近完成的行
+          percent = Math.max(percent, 92); // 跳到 92%
+          showDialog({ phase: 'updating', percent }); // 推送
+        }
+      }
+    };
+    child.stdout.on('data', feed); // 监听标准输出
+    child.stderr.on('data', feed); // 监听错误输出（npm 进度信息多在 stderr）
     // 等安装结束（10 分钟看门狗）
     const code = await new Promise((resolve) => {
       const timer = setTimeout(() => { try { child.kill(); } catch { /* 已死忽略 */ } resolve(null); }, 10 * 60_000); // 超时强杀
@@ -273,6 +293,7 @@ export async function updateDsh() {
       n.show(); // 弹出
     } catch { /* 通知失败忽略 */ }
   } finally {
+    clearInterval(heartbeat); // 停止进度心跳（任何路径）
     updatingDsh = false; // 复位
   }
   return dshState; // 返回状态

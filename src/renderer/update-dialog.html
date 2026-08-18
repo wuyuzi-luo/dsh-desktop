@@ -35,10 +35,12 @@
       <div class="hint" style="text-align:center">下载完成后将提示重启桌面端</div>
     </section>
 
-    <!-- 更新中：dsh 本体 npm 安装 -->
+    <!-- 更新中：dsh 本体 npm 安装（进度条实时反馈更新到哪了） -->
     <section id="view-updating" class="view center" hidden>
       <div class="spinner"></div>
       <div class="title-main">正在更新 dsh 本体…</div>
+      <div class="progress"><div class="bar" id="upBar"></div></div>
+      <div class="percent" id="upPercent">5%</div>
       <div class="hint" style="text-align:center">需要几分钟时间，请保持网络畅通</div>
     </section>
 

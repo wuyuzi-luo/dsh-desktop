@@ -82,9 +82,12 @@ function render(payload) {
     document.getElementById('verCurrent').textContent = '当前 v' + (payload.current ?? '-'); // 当前版本
     document.getElementById('verLatest').textContent = '新版本 v' + (payload.latest ?? '-'); // 新版本
     document.getElementById('notes').innerHTML = markdownToHtml(payload.notes ?? ''); // 更新内容（Markdown 转排版）
-  } else if (phase === 'downloading') { // 下载进度
+  } else if (phase === 'downloading') { // APP 下载进度
     document.getElementById('dlBar').style.width = (payload.percent ?? 0) + '%'; // 进度条
     document.getElementById('dlPercent').textContent = (payload.percent ?? 0) + '%'; // 百分比
+  } else if (phase === 'updating') { // dsh 更新进度（npm 安装逐步反馈）
+    document.getElementById('upBar').style.width = (payload.percent ?? 5) + '%'; // 进度条
+    document.getElementById('upPercent').textContent = (payload.percent ?? 5) + '%'; // 百分比
   } else if (phase === 'app-done') { // APP 完成：显示新版本号
     document.getElementById('appDoneVer').textContent = `新版本 v${payload.version ?? ''} 安装包已下载完成`; // 说明
   } else if (phase === 'dsh-done') { // dsh 完成：显示新版本号
