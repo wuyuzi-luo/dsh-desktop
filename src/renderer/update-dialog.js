@@ -94,8 +94,16 @@ function render(payload) {
     document.getElementById('dshDoneVer').textContent = `dsh 已更新到 v${payload.version ?? ''}，服务已重启`; // 说明
   } else if (phase === 'app-error') { // APP 下载失败
     document.getElementById('errorTitle').textContent = '安装包下载失败'; // 失败标题
+    document.getElementById('errorDetail').hidden = true; // 无详细原因
   } else if (phase === 'dsh-error') { // dsh 更新失败
     document.getElementById('errorTitle').textContent = 'dsh 本体更新失败'; // 失败标题
+    const detail = document.getElementById('errorDetail'); // 失败原因元素
+    if (payload.message) { // 有 npm 输出原因（如 overrides 冲突/网络错误）
+      detail.hidden = false; // 显示
+      detail.textContent = String(payload.message).slice(0, 500); // 截断展示
+    } else { // 无详细原因
+      detail.hidden = true; // 隐藏
+    }
   }
 }
 

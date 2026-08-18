@@ -276,13 +276,29 @@ export async function updateDsh() {
   const heartbeat = setInterval(() => bump(2), 4000); // 心跳：每 4 秒 +2%（无输出时也保证进度前进）
   try {
     const dir = getConfig('dshDir'); // 安装目录
+    // 安装前同步 overrides 到目标版本：overrides 是降级时锁旧版用的，若不同步 npm install 会与锁冲突直接失败
+    // （曾出现"点立即更新必失败"的问题：overrides 锁 rc.6 而安装目标 rc.7）
+    try {
+      const pkgPath = join(dir, 'package.json'); // 包清单路径
+      const pkg = JSON.parse(await readFile(pkgPath, 'utf8')); // 读并解析
+      if (pkg.overrides && typeof pkg.overrides === 'object') { // 存在 overrides
+        let changed = false; // 是否有变更
+        for (const k of Object.keys(pkg.overrides)) { // 逐个子包
+          if (pkg.overrides[k] !== latest) { pkg.overrides[k] = latest; changed = true; } // 同步到目标版本
+        }
+        if (changed) await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n'); // 写回
+      }
+    } catch { /* overrides 同步失败不阻塞更新（没有 overrides 时走普通安装） */ }
     const child = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit'], {
       cwd: dir, // 安装目录为工作目录
       shell: true, // Windows npm.cmd 解析
       windowsHide: true // 不弹黑窗
     });
+    let tail = ''; // npm 输出尾部缓冲（失败时显示真实原因）
     const feed = (chunk) => { // 处理 npm 输出行：推动进度 + 识别接近完成的行
-      for (const line of chunk.toString('utf8').split(/\r?\n/)) { // 逐行
+      const text = chunk.toString('utf8'); // 转字符串
+      tail = (tail + text).slice(-2000); // 只留尾部 2KB
+      for (const line of text.split(/\r?\n/)) { // 逐行
         if (!line.trim()) continue; // 空行跳过
         bump(2); // 每个输出行 +2%（下载/安装过程有输出即前进）
         if (/added\s+\d+|changed\s+\d+|audited\s+\d+|removed\s+\d+/.test(line)) { // 接近完成的行
@@ -299,8 +315,8 @@ export async function updateDsh() {
       child.on('exit', (c) => { clearTimeout(timer); resolve(c); }); // 正常退出
     });
     if (code !== 0) { // 失败
-      setDsh('error', { message: 'dsh 更新失败（网络或权限问题）' }); // 记错误态
-      showDialog({ phase: 'dsh-error' }); // 弹窗提示失败
+      setDsh('error', { message: tail.trim() || 'dsh 更新失败' }); // 记错误态（带真实原因）
+      showDialog({ phase: 'dsh-error', message: tail.trim() }); // 弹窗提示失败并展示 npm 输出原因
       return dshState; // 返回
     }
     setDsh('up-to-date', { current: latest, latest }); // 更新完成
