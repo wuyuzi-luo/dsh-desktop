@@ -61,6 +61,8 @@ export const IPC = {
   UPDATER_DOWNLOAD: 'updater:download',
   // 用户确认更新 dsh 本体
   UPDATER_DSH_UPDATE: 'updater:dsh-update',
+  // 面板后台补查 dsh 本体（不弹通知）
+  UPDATER_DSH_CHECK: 'updater:dsh-check',
   // 更新状态推送（发现新版/下载中/已是最新）
   UPDATER_STATE: 'updater:state'
 };

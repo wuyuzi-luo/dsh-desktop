@@ -135,8 +135,8 @@ async function getLocalDshVersion() {
   }
 }
 
-// 检测 dsh 本体更新（静默模式：失败不打扰，仅记状态）
-export async function checkDshUpdate({ manual = false } = {}) {
+// 检测 dsh 本体更新（失败不打扰，仅记状态；notify=false 为面板后台补查不弹通知）
+export async function checkDshUpdate({ manual = false, notify = true } = {}) {
   const current = await getLocalDshVersion(); // 本机版本
   setDsh('checking', { current }); // 检查中
   if (!current) { setDsh('error', { message: '未检测到 dsh 安装' }); return dshState; } // 无本机版本
@@ -149,7 +149,7 @@ export async function checkDshUpdate({ manual = false } = {}) {
       return dshState; // 返回
     }
     setDsh('available', { current, latest }); // 有新版本：仅提示
-    notifyAvailable('dsh 本体新版本可用', `dsh v${latest} 已发布（当前 v${current}），点击打开控制面板更新`); // 通知提示
+    if (notify) notifyAvailable('dsh 本体新版本可用', `dsh v${latest} 已发布（当前 v${current}），点击打开控制面板更新`); // 通知提示（补查不弹）
   } catch (err) {
     setDsh('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
   }
@@ -198,6 +198,7 @@ export function createUpdater(deps = {}) {
     download: downloadUpdate, // 用户确认下载 APP 更新
     silentDshCheck: () => checkDshUpdate({ manual: false }), // 启动静默检查 dsh
     manualDshCheck: () => checkDshUpdate({ manual: true }), // 面板手动检查 dsh
+    quietDshCheck: () => checkDshUpdate({ notify: false }), // 面板打开时后台补查（不弹通知）
     updateDsh, // 用户确认更新 dsh
     getState: () => ({ version: app.getVersion(), app: updaterState, dsh: dshState }) // 状态快照
   };

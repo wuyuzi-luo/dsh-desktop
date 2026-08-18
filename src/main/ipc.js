@@ -242,6 +242,12 @@ export function registerIpc(deps) {
     const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用
     return updater ? updater.updateDsh() : { status: 'idle' }; // 更新并返回
   });
+  ipcMain.handle(IPC.UPDATER_DSH_CHECK, async () => { // 面板后台补查 dsh（不弹通知）
+    const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用
+    if (!updater) return { status: 'idle' }; // 无更新器
+    await updater.quietDshCheck(); // 静默检查
+    return updater.getState(); // 返回最新快照
+  });
 }
 
 // 自动安装 dsh 主流程（独立函数：逻辑长，与注册代码分开）

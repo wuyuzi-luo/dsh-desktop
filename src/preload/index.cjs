@@ -34,7 +34,8 @@ const IPC = {
   MCP_ADOPT: 'mcp:adopt', // 收编外部 MCP
   UPDATER_CHECK: 'updater:check', // 检查更新
   UPDATER_DOWNLOAD: 'updater:download', // 确认下载 APP 更新
-  UPDATER_DSH_UPDATE: 'updater:dsh-update' // 确认更新 dsh
+  UPDATER_DSH_UPDATE: 'updater:dsh-update', // 确认更新 dsh
+  UPDATER_DSH_CHECK: 'updater:dsh-check' // 静默补查 dsh（不弹通知）
 };
 
 // 暴露给页面的 dshDesktop API（面板与 boot 页共用）
@@ -92,5 +93,6 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   // —— 更新 ——
   checkUpdate: () => ipcRenderer.invoke(IPC.UPDATER_CHECK), // 检查（APP + dsh）
   downloadUpdate: () => ipcRenderer.invoke(IPC.UPDATER_DOWNLOAD), // 确认下载 APP 更新
-  updateDsh: () => ipcRenderer.invoke(IPC.UPDATER_DSH_UPDATE) // 确认更新 dsh
+  updateDsh: () => ipcRenderer.invoke(IPC.UPDATER_DSH_UPDATE), // 确认更新 dsh
+  checkDshUpdate: () => ipcRenderer.invoke(IPC.UPDATER_DSH_CHECK) // 静默补查 dsh（不弹通知）
 });
