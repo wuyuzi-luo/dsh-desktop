@@ -7,8 +7,7 @@
 import { app, shell, Notification } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
 import { join } from 'node:path'; // 路径拼接
 import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 文件写出/读取
-import { spawn, exec } from 'node:child_process'; // npm 更新 dsh 用
-import { promisify } from 'node:util'; // 回调转 Promise
+import { spawn } from 'node:child_process'; // npm 更新 dsh 用
 import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler } from './window.js'; // 主窗口引用 + 更新弹窗
 import { getConfig } from './config.js'; // 配置读取
 
@@ -16,7 +15,6 @@ import { getConfig } from './config.js'; // 配置读取
 // 与打包工具链同策略关闭证书校验（个人工具，仓库与安装包均有签名，风险可接受）
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-const execP = promisify(exec); // npm view 用
 // GitHub 发布仓库（与 electron-builder.yml 的 publish 配置一致）
 const REPO = 'wuyuzi-luo/dsh-desktop';
 // dsh 官方仓库（拿本体更新说明用）
@@ -134,7 +132,14 @@ async function doCheckForUpdates({ popup = true, notify = true } = {}) {
     }
     if (notify) notifyAvailable('dsh 桌面新版本可用', `发现 v${remote}（当前 v${app.getVersion()}），可在控制面板更新`); // 系统通知双保险
   } catch (err) {
-    setApp('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
+    const known = updaterState.status === 'available' || updaterState.status === 'up-to-date' || updaterState.status === 'downloaded'; // 之前已确认过结果
+    if (known) { // 网络失败：不覆盖已确认状态（与 dsh 检查同策略，防矛盾现象）
+      if (popup === 'force' && updaterState.info?.version) { // 手动检查失败但已知有新版：用缓存数据重弹
+        showConfirmDialog('app', 'dsh 桌面端', app.getVersion(), updaterState.info.version, updaterState.info.notes); // 重弹确认窗
+      }
+    } else { // 首次检查就失败：才记错误态
+      setApp('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
+    }
   }
   return updaterState; // 返回状态
 }
@@ -220,8 +225,14 @@ async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
   setDsh('checking', { current }); // 检查中
   if (!current) { setDsh('error', { message: '未检测到 dsh 安装' }); return dshState; } // 无本机版本
   try {
-    const { stdout } = await execP('npm view @deepseek-ai/dsh version', { timeout: 20000 }); // 查 npm 最新版
-    const latest = String(stdout).trim().split(/\s+/)[0]; // 取第一行第一个值
+    // 查 npm 最新版：改用 fetch 直连 registry（复用主进程 TLS 豁免，比子进程 npm view 更稳定，
+    // 之前"检查失败"频发多因 npm CLI 子进程受系统代理/证书影响）
+    const res = await fetch('https://registry.npmjs.org/@deepseek-ai/dsh/latest', { // registry 简写端点
+      headers: { 'User-Agent': 'dsh-desktop' }, // 礼貌标识
+      signal: AbortSignal.timeout(15000) // 15s 超时
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`); // 非 200
+    const latest = String((await res.json())?.version ?? '').trim(); // 最新版本号
     if (!latest) throw new Error('no version'); // 无结果
     if (compareVersions(latest, current) <= 0) { // 不比当前新
       setDsh('up-to-date', { current, latest }); // 已是最新
@@ -235,7 +246,14 @@ async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
     }
     if (notify) notifyAvailable('dsh 本体新版本可用', `dsh v${latest} 已发布（当前 v${current}），可在控制面板更新`); // 系统通知双保险
   } catch (err) {
-    setDsh('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
+    const known = dshState.status === 'available' || dshState.status === 'up-to-date'; // 之前已确认过结果
+    if (known) { // 网络失败：不覆盖已确认状态（避免"弹窗说新版、面板报失败"矛盾）
+      if (popup === 'force' && dshState.latest && dshState.current && compareVersions(dshState.latest, dshState.current) > 0) {
+        showConfirmDialog('dsh', 'dsh 本体', dshState.current, dshState.latest, dshState.notes); // 用缓存数据重弹（用户仍可更新）
+      }
+    } else { // 首次检查就失败：才记错误态
+      setDsh('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
+    }
   }
   return dshState; // 返回状态
 }

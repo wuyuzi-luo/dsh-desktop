@@ -220,7 +220,10 @@ function reportCheckResult() {
   const d = snapshot?.updater?.dsh ?? {}; // dsh 状态
   const appNew = u.status === 'available'; // APP 有新版
   const dshNew = d.status === 'available'; // dsh 有新版
-  if (appNew || dshNew) return; // 有新版：确认弹窗已弹出，不再弹消息框
+  // 检查失败但保留着上次"有新版"的结论（latest>current）时同样视为有新版（弹窗已由主进程重弹）
+  const appHasKnownUpdate = appNew || (u.info?.version && u.info.version !== snapshot?.version); // APP 有已知新版
+  const dshHasKnownUpdate = dshNew || (d.latest && d.current && d.latest !== d.current); // dsh 有已知新版
+  if (appHasKnownUpdate || dshHasKnownUpdate) return; // 有新版：确认弹窗已弹出（或由主进程重弹），不再弹消息框
   const lines = []; // 详情行（空行分隔，左对齐）
   if (u.status === 'up-to-date') { // APP 已是最新
     lines.push(`桌面端当前版本为：v${u.info?.version ?? snapshot?.version ?? '-'}，已是最新`); // 桌面端状态行
