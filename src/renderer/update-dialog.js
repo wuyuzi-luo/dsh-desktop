@@ -1,7 +1,7 @@
 // 更新弹窗脚本：订阅主进程推送，渲染 确认/下载中/更新中/完成/暂不更新/失败 六种视图
 // 底部按钮行按视图切换显隐与文案，点击通过 window.dshDesktop.updateDialogAction 回传主进程
 
-// 各视图元素（phase → 视图切换）
+// 各视图元素（phase → 视图切换；error 页被 app-error/dsh-error 两个状态共用）
 const views = {
   confirm: document.getElementById('view-confirm'), // 确认页：发现新版本
   downloading: document.getElementById('view-downloading'), // 下载中：APP 安装包
@@ -9,8 +9,7 @@ const views = {
   'app-done': document.getElementById('view-app-done'), // APP 更新完成：请重启
   'dsh-done': document.getElementById('view-dsh-done'), // dsh 更新完成
   deferred: document.getElementById('view-deferred'), // 暂不更新告知页
-  'app-error': document.getElementById('view-error'), // APP 下载失败
-  'dsh-error': document.getElementById('view-error') // dsh 更新失败
+  error: document.getElementById('view-error') // 失败页（APP 下载失败 / dsh 更新失败 共用）
 };
 
 // 底部按钮元素
@@ -19,8 +18,11 @@ const btnLaterRestart = document.getElementById('btnLaterRestart'); // 稍后（
 const btnUpdate = document.getElementById('btnUpdate'); // 主按钮（文案随视图变化）
 
 // 显示指定视图（其余全部隐藏）
+// 注意：app-error 与 dsh-error 共用 error 视图，必须归一后再切换
+// （旧实现把它们当成两个 key 指向同一元素，遍历时后者把 hidden 设回 true，导致失败页永远空白）
 function showView(phase) {
-  for (const [key, el] of Object.entries(views)) el.hidden = key !== phase; // 逐个切换
+  const target = (phase === 'app-error' || phase === 'dsh-error') ? 'error' : phase; // 归一化
+  for (const [key, el] of Object.entries(views)) el.hidden = key !== target; // 逐个切换
 }
 
 // 按视图配置底部按钮：显隐 + 主按钮文案
