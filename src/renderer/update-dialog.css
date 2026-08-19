@@ -93,7 +93,8 @@ html, body {
 .notes code { background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 0 5px; font-size: 11.5px; } /* 行内代码 */
 .notes b { color: #e6edf3; } /* 加粗 */
 
-.hint { color: #8b949e; font-size: 12.5px; line-height: 1.7; text-align: left; } /* 辅助说明 */
+.hint { color: #8b949e; font-size: 12.5px; line-height: 1.7; text-align: left; white-space: pre-line; } /* 辅助说明（pre-line 让 \n 换行生效） */
+.hint.stuck { color: #f0883e; font-weight: 600; } /* 卡住警示：橙色高亮 */
 .err-detail { /* 失败页具体原因（npm 输出） */
   max-width: 100%;
   max-height: 90px; /* 过长滚动 */

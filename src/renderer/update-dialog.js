@@ -47,6 +47,20 @@ function renderActions(phase) {
   // 下载中/更新中：无按钮（进度由主进程自动接续）
 }
 
+// 默认等待提示文案（用户指定：告知更新时长预期与注意事项）
+const DEFAULT_WAIT_HINT = '根据网络情况，本次更新可能需要几分钟到十几分钟不等，请耐心等待，且保持网络通畅和界面打开';
+
+// 设置进度提示文字：hint 非空=卡住警示（橙色），空=恢复正常默认文案（extra 为附加说明行，仅正常时显示）
+function setHint(el, hint, extra) {
+  if (hint) { // 卡住：显示原因
+    el.textContent = hint; // 卡住原因
+    el.classList.add('stuck'); // 橙色警示
+  } else { // 正常：用户指定文案（+ 附加说明）
+    el.textContent = DEFAULT_WAIT_HINT + (extra ? '\n' + extra : ''); // 默认文案
+    el.classList.remove('stuck'); // 去警示色
+  }
+}
+
 // HTML 转义（防注入：更新内容来自外部 release body，必须先转义）
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -85,9 +99,11 @@ function render(payload) {
   } else if (phase === 'downloading') { // APP 下载进度
     document.getElementById('dlBar').style.width = (payload.percent ?? 0) + '%'; // 进度条
     document.getElementById('dlPercent').textContent = (payload.percent ?? 0) + '%'; // 百分比
+    setHint(document.getElementById('dlHint'), payload.hint); // 卡住警示或默认文案
   } else if (phase === 'updating') { // dsh 更新进度（npm 安装逐步反馈）
     document.getElementById('upBar').style.width = (payload.percent ?? 5) + '%'; // 进度条
     document.getElementById('upPercent').textContent = (payload.percent ?? 5) + '%'; // 百分比
+    setHint(document.getElementById('upHint'), payload.hint, '更新期间服务会短暂暂停，完成后自动重启（属正常现象）'); // 卡住警示或默认文案+暂停说明
   } else if (phase === 'app-done') { // APP 完成：显示新版本号
     document.getElementById('appDoneVer').textContent = `新版本 v${payload.version ?? ''} 安装包已下载完成`; // 说明
   } else if (phase === 'dsh-done') { // dsh 完成：显示新版本号

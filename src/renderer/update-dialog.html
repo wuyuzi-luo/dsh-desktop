@@ -26,22 +26,22 @@
       <div class="notes" id="notes"></div>
     </section>
 
-    <!-- 下载中：APP 安装包下载进度 -->
+    <!-- 下载中：APP 安装包下载进度（卡住时 hint 变橙色警示） -->
     <section id="view-downloading" class="view center" hidden>
       <div class="spinner"></div>
       <div class="title-main">正在下载新版本…</div>
       <div class="progress"><div class="bar" id="dlBar"></div></div>
       <div class="percent" id="dlPercent">0%</div>
-      <div class="hint" style="text-align:center">下载完成后将提示重启桌面端</div>
+      <div class="hint" id="dlHint" style="text-align:center">根据网络情况，本次更新可能需要几分钟到十几分钟不等，请耐心等待，且保持网络通畅和界面打开</div>
     </section>
 
-    <!-- 更新中：dsh 本体 npm 安装（进度条实时反馈更新到哪了） -->
+    <!-- 更新中：dsh 本体 npm 安装（进度条实时反馈更新到哪了；卡住时 hint 变橙色警示） -->
     <section id="view-updating" class="view center" hidden>
       <div class="spinner"></div>
       <div class="title-main">正在更新 dsh 本体…</div>
       <div class="progress"><div class="bar" id="upBar"></div></div>
       <div class="percent" id="upPercent">5%</div>
-      <div class="hint" style="text-align:center">需要几分钟时间，请保持网络畅通<br>更新期间服务会短暂暂停，完成后自动重启（属正常现象）</div>
+      <div class="hint" id="upHint" style="text-align:center">根据网络情况，本次更新可能需要几分钟到十几分钟不等，请耐心等待，且保持网络通畅和界面打开<br>更新期间服务会短暂暂停，完成后自动重启（属正常现象）</div>
     </section>
 
     <!-- APP 更新完成：请重启桌面端 -->

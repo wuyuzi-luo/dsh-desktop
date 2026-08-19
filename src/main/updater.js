@@ -151,6 +151,24 @@ export async function downloadUpdate() {
   if (updaterState.status !== 'available' || !info?.url) return updaterState; // 状态不符不下载
   setApp('downloading', { version: info.version, percent: 0 }); // 进入下载（0%）
   showDialog({ phase: 'downloading', percent: 0 }); // 弹窗切到下载进度页
+  // 卡住检测：60 秒内 0 字节进展 → 弹窗橙字提示原因 + 系统通知（只弹一次）；恢复后自动回默认文案
+  let lastData = Date.now(); // 最后收到下载数据的时间戳
+  let stuckNotified = false; // 本次卡住是否已发过系统通知（防重复骚扰）
+  const stuckTimer = setInterval(() => {
+    if (updaterState.status !== 'downloading') return; // 下载已结束（完成/失败）
+    const idle = Math.round((Date.now() - lastData) / 1000); // 已空闲秒数
+    const percent = updaterState.info?.percent ?? 0; // 当前进度
+    if (idle >= 60) { // 判定卡住
+      showDialog({ phase: 'downloading', percent, hint: `已 ${idle} 秒没有下载数据：可能网络较慢或与 GitHub 连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字
+      if (!stuckNotified) { // 首次卡住 → 系统通知（切到别的窗口也能看到）
+        stuckNotified = true; // 置标志
+        try { new Notification({ title: '下载可能卡住了', body: '已超过 1 分钟没有下载进展，请检查网络连接' }).show(); } catch { /* 忽略 */ }
+      }
+    } else if (stuckNotified && idle < 10) { // 已恢复进展
+      stuckNotified = false; // 复位
+      showDialog({ phase: 'downloading', percent, hint: '' }); // 恢复正常文案
+    }
+  }, 10000); // 每 10 秒检查一次
   try {
     const dl = await fetch(info.url, { signal: AbortSignal.timeout(600000) }); // 下载安装包（最长 10 分钟）
     if (!dl.ok || !dl.body) throw new Error(`download HTTP ${dl.status}`); // 下载失败
@@ -164,6 +182,7 @@ export async function downloadUpdate() {
       if (done) break; // 完成
       chunks.push(value); // 收集
       received += value.length; // 累加
+      lastData = Date.now(); // 更新最后数据时间（卡住检测基准）
       if (total) { // 已知总量才报进度
         const percent = Math.round((received / total) * 100); // 百分比
         setApp('downloading', { version: info.version, percent }); // 面板状态
@@ -184,6 +203,8 @@ export async function downloadUpdate() {
   } catch (err) {
     setApp('error', { message: String(err?.message ?? err) }); // 记错误态
     showDialog({ phase: 'app-error' }); // 弹窗提示下载失败（保持弹窗可见并给出反馈）
+  } finally {
+    clearInterval(stuckTimer); // 停止卡住检测（下载结束）
   }
   return updaterState; // 返回状态
 }
@@ -276,6 +297,23 @@ export async function updateDsh() {
   };
   showDialog({ phase: 'updating', percent }); // 弹窗切到"正在更新"页（5%）
   const heartbeat = setInterval(() => bump(2), 4000); // 心跳：每 4 秒 +2%（无输出时也保证进度前进）
+  // 卡住检测：60 秒无任何 npm 输出 → 弹窗橙字提示原因 + 系统通知（只弹一次）；恢复后自动回默认文案
+  let lastOutput = Date.now(); // 最后一次收到 npm 输出的时间戳
+  let stuckNotified = false; // 本次卡住是否已发过系统通知（防重复骚扰）
+  const stuckTimer = setInterval(() => {
+    if (dshState.status !== 'updating') return; // 更新已结束
+    const idle = Math.round((Date.now() - lastOutput) / 1000); // 已空闲秒数
+    if (idle >= 60) { // 判定卡住
+      showDialog({ phase: 'updating', percent, hint: `已 ${idle} 秒没有安装进展：可能网络较慢或连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字
+      if (!stuckNotified) { // 首次卡住 → 系统通知
+        stuckNotified = true; // 置标志
+        try { new Notification({ title: 'dsh 更新可能卡住了', body: '已超过 1 分钟没有安装进展，请检查网络连接' }).show(); } catch { /* 忽略 */ }
+      }
+    } else if (stuckNotified && idle < 10) { // 已恢复输出
+      stuckNotified = false; // 复位
+      showDialog({ phase: 'updating', percent, hint: '' }); // 恢复正常文案
+    }
+  }, 10000); // 每 10 秒检查一次
   try {
     const dir = getConfig('dshDir'); // 安装目录
     // 安装前同步 overrides 到目标版本：overrides 是降级时锁旧版用的，若不同步 npm install 会与锁冲突直接失败
@@ -299,6 +337,7 @@ export async function updateDsh() {
     let tail = ''; // npm 输出尾部缓冲（失败时显示真实原因）
     const feed = (chunk) => { // 处理 npm 输出行：推动进度 + 识别接近完成的行
       const text = chunk.toString('utf8'); // 转字符串
+      if (text.trim()) lastOutput = Date.now(); // 有输出即刷新卡住检测基准
       tail = (tail + text).slice(-2000); // 只留尾部 2KB
       for (const line of text.split(/\r?\n/)) { // 逐行
         if (!line.trim()) continue; // 空行跳过
@@ -330,6 +369,7 @@ export async function updateDsh() {
     } catch { /* 通知失败忽略 */ }
   } finally {
     clearInterval(heartbeat); // 停止进度心跳（任何路径）
+    clearInterval(stuckTimer); // 停止卡住检测（更新结束）
     updatingDsh = false; // 复位
   }
   return dshState; // 返回状态
