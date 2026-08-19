@@ -56,14 +56,21 @@ body::before {
   content: "";
   position: fixed !important;
   inset: 0 !important;
-  z-index: -1 !important;
+  z-index: 0 !important;
   background-image: url("${dataUrl}") !important;
   background-size: cover !important;
   background-position: center !important;
   background-repeat: no-repeat !important;
   opacity: ${opacity} !important;
   pointer-events: none !important;
-}`; // 背景独立层，透明度只影响背景
+}
+/* 页面内容提到背景之上，并把 body 直接子容器（dsh 皮肤插件画背景的根层）背景透明化，
+   否则皮肤插件的背景会盖住桌面端壁纸（z-index:-1 时代"选图无报错但背景不变"的根因） */
+body > *:not(#${STYLE_ID}):not(style) {
+  position: relative !important;
+  z-index: 1 !important;
+  background: transparent !important;
+}`; // 背景独立层：位于 body 背景之上、页面内容之下，透明度只影响背景
   // 先删旧 style 再插入新的（幂等切换）
   return `(() => {
   const old = document.getElementById('${STYLE_ID}');
