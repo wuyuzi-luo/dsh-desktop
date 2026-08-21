@@ -110,6 +110,9 @@ export function createHostSupervisor() {
     const cliEntry = getDshCliEntry(); // CLI 入口绝对路径
     const cwd = getConfig('dshDir'); // 工作目录 = dsh 安装目录
     const env = { ...process.env, DSH_HOME: getConfig('dshHome') }; // 注入数据目录环境变量
+    // 剔除主进程为自身网络设置的证书豁免变量：它会被子进程继承，
+    // dsh 启动时打印 "NODE_TLS_REJECT_UNAUTHORIZED...insecure" 警告，被错误页显示后误导用户以为是错误原因
+    delete env.NODE_TLS_REJECT_UNAUTHORIZED; // 不传递给 dsh 服务
     child = spawn('node', [cliEntry, 'web', '--port', String(port)], {
       cwd, // 工作目录
       env, // 环境变量

@@ -43,17 +43,40 @@ function pushState() {
 function setApp(status, info) { updaterState = { status, info: info ?? updaterState.info }; pushState(); } // APP 状态变更
 function setDsh(status, extra) { dshState = { ...dshState, status, ...(extra ?? {}) }; pushState(); } // dsh 状态变更
 
-// 简单 semver 比较：返回 1（a 新）、-1（b 新）、0（相同）
+// semver 比较：返回 1（a 新）、-1（b 新）、0（相同）
+// 正确解析 主版本 与 预发布段：0.1.1-rc.1 → 主 [0,1,1] + 预 [rc,1]
+// （旧实现按 '.' 盲切，"1-rc" 转 NaN 导致 0.1.1-rc.1 被误判为比 0.1.0-rc.7 旧）
 function compareVersions(a, b) {
-  const pa = String(a).replace(/^v/, '').split('.').map(Number); // 解析 a
-  const pb = String(b).replace(/^v/, '').split('.').map(Number); // 解析 b
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { // 逐段比较
-    const x = pa[i] ?? 0; // 缺段补 0
-    const y = pb[i] ?? 0; // 缺段补 0
+  const parse = (v) => { // 解析版本串
+    const s = String(v ?? '').replace(/^v/, ''); // 去 v 前缀
+    const dash = s.indexOf('-'); // 预发布分隔符
+    const main = dash >= 0 ? s.slice(0, dash) : s; // 主版本部分
+    const pre = dash >= 0 ? s.slice(dash + 1) : ''; // 预发布部分
+    return { main: main.split('.').map(Number), pre: pre ? pre.split('.') : [] }; // 结构化
+  };
+  const A = parse(a); // 解析 a
+  const B = parse(b); // 解析 b
+  for (let i = 0; i < Math.max(A.main.length, B.main.length); i++) { // 主版本逐段比较
+    const x = A.main[i] ?? 0; // 缺段补 0
+    const y = B.main[i] ?? 0; // 缺段补 0
     if (x > y) return 1; // a 新
     if (x < y) return -1; // b 新
   }
-  return 0; // 相同
+  // 主版本相同：按 semver 规则比预发布（有预发布段者更旧；数字段大于字符串段）
+  if (A.pre.length && !B.pre.length) return -1; // a 是预发布 b 是正式 → b 新
+  if (!A.pre.length && B.pre.length) return 1; // a 正式 b 预发布 → a 新
+  for (let i = 0; i < Math.max(A.pre.length, B.pre.length); i++) { // 预发布逐段比较
+    const x = A.pre[i] ?? ''; // 缺段补空
+    const y = B.pre[i] ?? ''; // 缺段补空
+    if (x === y) continue; // 相同继续
+    const nx = Number(x); const ny = Number(y); // 数字化
+    const xNum = x !== '' && !Number.isNaN(nx); // x 是数字段
+    const yNum = y !== '' && !Number.isNaN(ny); // y 是数字段
+    if (xNum && yNum) return nx > ny ? 1 : -1; // 双数字：比大小
+    if (xNum !== yNum) return xNum ? 1 : -1; // 数字段 > 字符串段（semver 规则）
+    return x > y ? 1 : -1; // 双字符串：字典序
+  }
+  return 0; // 完全相同
 }
 
 // 检查串行队列：面板自动补查与手动检查可能并发，若交错执行会旧结果覆盖新结果
