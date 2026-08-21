@@ -41,13 +41,13 @@ function renderActions(phase) {
   } else if (phase === 'dsh-done') { // dsh 完成：完成
     btnUpdate.hidden = false; // 显示完成
     btnUpdate.textContent = '完成'; // 主按钮文案
-  } else if (phase === 'dsh-error') { // dsh 失败页：重试 + 知道了（失败后用户仍有明确下一步，不"失联"）
+  } else if (phase === 'dsh-error' || phase === 'app-error') { // 失败页：重试 + 知道了（失败后用户仍有明确下一步，不"失联"）
     btnLaterRestart.hidden = false; // 显示重试
     btnLaterRestart.textContent = '重试'; // 重试按钮文案
     btnUpdate.hidden = false; // 显示知道了
     btnUpdate.textContent = '知道了'; // 主按钮文案
-  } else if (phase === 'deferred' || phase === 'app-error') {
-    // 告知页/APP 失败页：知道了
+  } else if (phase === 'deferred') {
+    // 告知页：知道了
     btnUpdate.hidden = false; // 显示知道了
     btnUpdate.textContent = '知道了'; // 主按钮文案
   }
@@ -160,8 +160,8 @@ document.getElementById('btnClose').addEventListener('click', () => window.close
 btnLater.addEventListener('click', () => { // 确认页"暂不更新"
   window.dshDesktop.updateDialogAction('later'); // 主进程切告知页
 });
-btnLaterRestart.addEventListener('click', () => { // 副按钮：APP 完成页"稍后" / dsh 失败页"重试"
-  if (currentPhase === 'dsh-error') { // dsh 失败页 → 重试：主进程用缓存信息重弹确认弹窗
+btnLaterRestart.addEventListener('click', () => { // 副按钮：APP 完成页"稍后" / 失败页"重试"
+  if (currentPhase === 'dsh-error' || currentPhase === 'app-error') { // 失败页 → 重试：主进程用缓存信息重弹确认弹窗
     window.dshDesktop.updateDialogAction('retry'); // 重弹确认弹窗（重新选源/更新）
   } else { // APP 完成页"稍后"
     window.dshDesktop.updateDialogAction('done'); // 关闭弹窗（可稍后手动运行安装包）

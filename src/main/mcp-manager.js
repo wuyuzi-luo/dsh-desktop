@@ -2,9 +2,9 @@
 // web profile 的 cordis.patch.yml 标记段；用户手写内容字节级保留（不整体解析重写）
 
 import yaml from 'js-yaml'; // YAML 解析/序列化（只处理应用自己的标记段）
-import { readFile, writeFile, copyFile } from 'node:fs/promises'; // 文件读写与备份
+import { readFile, writeFile, copyFile, mkdir } from 'node:fs/promises'; // 文件读写、备份与建目录
 import { existsSync } from 'node:fs'; // 存在性检查
-import { join } from 'node:path'; // 路径拼接
+import { join, dirname } from 'node:path'; // 路径拼接
 import { homedir } from 'node:os'; // 用户主目录（~/.claude.json 位置）
 import { getCordisPatchPath, getConfig, setConfig } from './config.js'; // 路径与配置存取
 
@@ -95,6 +95,7 @@ async function syncToPatchFile() {
   const block = renderManagedBlock(defs); // 生成新块（无启用项则为空）
   const next = cleaned.replace(/\n*$/, '\n') + (block ? '\n' + block : ''); // 拼回：原文尾部规整 + 新块
   if (next !== original) { // 有变化才写
+    await mkdir(dirname(path), { recursive: true }); // 确保父目录存在（修复：全新机器 dsh 未装时 profiles 目录不存在，writeFile 抛 ENOENT 打断主进程装配链）
     if (existsSync(path)) await copyFile(path, path + '.bak'); // 写前备份
     await writeFile(path, next, 'utf8'); // 覆盖写
   }

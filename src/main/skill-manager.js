@@ -115,7 +115,10 @@ export async function installSkill(sourcePath) {
     tmpDir = join(tmpdir(), `dsh-skill-extract-${Date.now()}`); // 临时解压目录
     await mkdir(tmpDir, { recursive: true }); // 建目录
     try { // 用 Windows 自带 PowerShell 解压（零新依赖）
-      await execFileP('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${sourcePath}' -DestinationPath '${tmpDir}' -Force`], { timeout: 120000 }); // 解压
+      // 修复：路径含单引号（如用户名 wuyuzi'scomputer）会破坏 PowerShell 单引号字符串导致 ParserError，
+      // 按 PowerShell 规则把 ' 转义为 '' 后再嵌入命令
+      const psSafe = (p) => String(p).replace(/'/g, "''"); // 单引号转义
+      await execFileP('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${psSafe(sourcePath)}' -DestinationPath '${psSafe(tmpDir)}' -Force`], { timeout: 120000 }); // 解压
     } catch (err) { // 解压失败
       await rm(tmpDir, { recursive: true, force: true }).catch(() => {}); // 清理
       throw new Error('zip 解压失败: ' + String(err?.message ?? err)); // 报错

@@ -313,15 +313,15 @@ async function autoInstallDsh(deps, registry) {
   push('start', `正在安装 dsh 到 ${target}，需要几分钟，请保持网络畅通…`); // 开始提示
 
   // 3. 安装前清理残留 npm 进程：上次安装失败/中断残留的 npm 会锁文件，导致重装卡死
-  //（与更新逻辑同一策略：只杀命令行含 npm-cli 的 node 进程，不误伤其他程序）
+  //（与更新逻辑同一策略：只杀本项目的 dsh 安装进程，不误伤其他项目的 npm install）
   await new Promise((resolve) => {
     const ps = spawn('powershell', ['-NoProfile', '-Command', // PowerShell 精准过滤
-      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*npm-cli*install*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
+      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*npm-cli*install*' -and $_.CommandLine -like '*deepseek-ai/dsh*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
       shell: false, // 直接调 powershell
       windowsHide: true // 不弹黑窗
     });
     ps.on('exit', () => resolve()); // 执行完即返回
-    setTimeout(() => { try { ps.kill(); } catch { /* 忽略 */ } resolve(); }, 10000); // 10 秒兜底
+    setTimeout(() => { try { ps.kill(); } catch { /* 忽略 */ } resolve(); }, 30000); // 30 秒兜底（PowerShell 冷启动慢）
   });
 
   // 4. npm install（shell:true 保证 Windows 下 npm.cmd 可解析；windowsHide 不弹黑窗）

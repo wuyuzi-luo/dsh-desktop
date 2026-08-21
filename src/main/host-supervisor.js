@@ -113,27 +113,28 @@ export function createHostSupervisor() {
     // 剔除主进程为自身网络设置的证书豁免变量：它会被子进程继承，
     // dsh 启动时打印 "NODE_TLS_REJECT_UNAUTHORIZED...insecure" 警告，被错误页显示后误导用户以为是错误原因
     delete env.NODE_TLS_REJECT_UNAUTHORIZED; // 不传递给 dsh 服务
-    child = spawn('node', [cliEntry, 'web', '--port', String(port), '--no-open'], {
+    const spawned = spawn('node', [cliEntry, 'web', '--port', String(port), '--no-open'], {
       cwd, // 工作目录
       env, // 环境变量
       stdio: ['ignore', 'pipe', 'pipe'], // 关 stdin，接管 stdout/stderr
       windowsHide: true // 不弹黑窗
     }); // 直接 node 起 bin.js（PID 即服务本体；--port 必须传：否则 dsh 起默认 3080，与探测/心跳端口不一致会被心跳误杀）
     // --no-open：dsh 0.1.1-rc.1 起 web 命令默认自动打开浏览器，桌面端有自己的窗口，禁用（否则每次启动都弹浏览器标签页）
+    child = spawned; // 更新模块级引用（本任务实例）
     owned = true; // 标记为自己托管
 
     // 就绪等待：stdout 解析为主
     const ready = await new Promise((resolve) => {
       let settled = false; // 防止重复决议
       const timer = setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, READINESS_TIMEOUT_MS); // 超时兜底
-      child.stdout.on('data', (chunk) => { // 监听输出
+      spawned.stdout.on('data', (chunk) => { // 监听输出
         const url = parser.push(chunk); // 喂给解析器
         if (url && !settled) { settled = true; clearTimeout(timer); resolve(url); } // 就绪
       });
-      child.stderr.on('data', (chunk) => { // 收集错误输出
+      spawned.stderr.on('data', (chunk) => { // 收集错误输出
         stderrTail = (stderrTail + chunk.toString('utf8')).slice(-4096); // 只留尾部 4KB
       });
-      child.on('exit', (code) => { // 进程提前退出
+      spawned.on('exit', (code) => { // 进程提前退出
         if (!settled) { settled = true; clearTimeout(timer); resolve(null); } // 视为失败
         if (code !== null && code !== 0) stderrTail += `\n[exit code ${code}]`; // 记退出码
       });
@@ -143,9 +144,12 @@ export function createHostSupervisor() {
       setState('running'); // 进 running
       return 'started'; // 报告新启动
     }
-    // 启动失败：清理并进 error
-    if (child && !child.killed) child.kill(); // 杀残留进程
-    child = null; owned = false; readyUrl = null; // 清理句柄
+    // 启动失败：仅当模块级 child 仍是本任务实例时才清理
+    // （修复：启动中用户点"重启"会 spawn 新实例写回 child，旧任务失败路径若直接杀 child 会误杀新服务）
+    if (child === spawned) { // 仍是本任务实例
+      if (!spawned.killed) spawned.kill(); // 杀残留进程
+      child = null; owned = false; readyUrl = null; // 清理句柄
+    }
     setState('error'); // 进错误态
     return 'failed'; // 报告失败
   }
@@ -193,6 +197,7 @@ export function createHostSupervisor() {
       if (heartbeatFailures >= 3) { // 连续 3 次失败（约 30 秒）
         heartbeatFailures = 0; // 复位
         if (owned && child) { try { child.kill(); } catch { /* 已死忽略 */ } child = null; owned = false; } // 清理托管句柄
+        stderrTail = ''; // 清空诊断尾部（运行中静默死亡没有新 stderr，清掉防 onStatus 误弹历史残留）
         setState('error'); // 状态转 error（面板红灯 + boot 错误页）
         onDead?.(); // 通知回调（index.js 弹"服务异常"通知）
       }

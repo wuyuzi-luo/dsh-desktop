@@ -58,8 +58,13 @@ function render(state, url) {
   }
 }
 
+// 是否已收到过主进程推送（修复：初始 getState 慢快照会覆盖更早的实时推送——
+// 冷启动 + MCP 探测慢时，missing 推送先渲染出引导页，随后携带旧 'stopped' 状态的慢快照到达把界面覆盖掉）
+let pushed = false; // 已收到推送标志
+
 // 订阅主进程推送
 window.dshDesktop.onState((payload) => {
+  pushed = true; // 标记已收到实时推送
   if (!payload) return; // 空载荷忽略
   if (payload.type === 'service') { // 服务状态变化 → 重绘
     render(payload.state, payload.url);
@@ -157,7 +162,7 @@ nodeHintLink.addEventListener('click', () => {
   window.dshDesktop.openExternal('https://nodejs.org/zh-cn/download'); // 中文官网下载页
 });
 
-// 初始拉取一次当前状态（防止错过推送）
+// 初始拉取一次当前状态（防止错过推送；但若已收到过实时推送，旧快照不得覆盖新状态）
 window.dshDesktop.getState().then((snap) => {
-  if (snap && snap.service) render(snap.service); // 渲染当前态
+  if (snap && snap.service && !pushed) render(snap.service); // 仅在未收到推送时用快照初始化
 });

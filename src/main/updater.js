@@ -7,6 +7,7 @@
 import { app, shell, Notification } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
 import { join } from 'node:path'; // 路径拼接
 import { writeFile, mkdir, readFile, rm } from 'node:fs/promises'; // 文件写出/读取/删除
+import { readdirSync, statSync } from 'node:fs'; // npm 日志定位/大小采样（卡死双判据用）
 import { spawn } from 'node:child_process'; // npm 更新 dsh 用
 import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler } from './window.js'; // 主窗口引用 + 更新弹窗
 import { getConfig } from './config.js'; // 配置读取
@@ -35,6 +36,7 @@ let appDialogShown = false; // APP 确认弹窗本次进程只弹一次（手动
 let dshDialogShown = false; // dsh 确认弹窗本次进程只弹一次（手动检查强制弹时不受限）
 let dialogType = null; // 弹窗当前对应的组件类型（app | dsh）
 let dialogQueue = []; // 待弹弹窗队列（APP 与 dsh 同时有新版时依次弹，避免覆盖）
+let currentDialog = null; // 当前正在显示的弹窗 payload（队列头出队后驻留于此，关闭时置 null 接续下一个）
 let downloadDialogDismissed = false; // 用户在下载期间主动关闭了弹窗（进度推送不再重建窗口，完成页仍必弹）
 
 // 推送全部更新状态给面板（面板若开着）
@@ -113,24 +115,26 @@ function showConfirmDialog(type, label, current, latest, notes) {
   enqueueDialog({ phase: 'confirm', type, label, current, latest, notes: notes || '' }); // 入队确认页（源选择每次默认镜像，不记忆）
 }
 
-// 弹窗队列：入队；当前无弹窗时立即弹（有则等当前弹窗关闭后由 onDialogClosed 接续）
+// 弹窗队列：入队；当前无弹窗时立即弹，有则等当前弹窗关闭后接续
+// （修复：旧实现入队即出队、队列恒空，"等关闭再弹下一个"从未生效——APP 与 dsh 同时有新版时互相覆盖）
 function enqueueDialog(payload) {
   dialogQueue.push(payload); // 入队
-  if (dialogQueue.length === 1) showNextDialog(); // 队列只有自己 → 立即弹
+  if (!currentDialog) showNextDialog(); // 当前无弹窗 → 立即弹（有则排队等关闭）
 }
 
 // 弹出队列中的下一个弹窗（payload 里带 type，"立即更新"按钮据此选择更新链路）
 function showNextDialog() {
-  const payload = dialogQueue.shift(); // 出队
-  if (!payload) return; // 队列空
-  dialogType = payload.type ?? null; // 记录当前弹窗的组件类型
-  showDialog(payload); // 弹窗
+  currentDialog = dialogQueue.shift() ?? null; // 出队为当前弹窗
+  if (!currentDialog) return; // 队列空
+  dialogType = currentDialog.type ?? null; // 记录当前弹窗的组件类型
+  showDialog(currentDialog); // 弹窗
 }
 
 // 弹窗窗口关闭回调：继续弹队列中的下一个（window.js closed 事件注入）
 setUpdateDialogClosedHandler(() => {
   if (updaterState.status === 'downloading') downloadDialogDismissed = true; // 下载中用户主动关窗：标记（进度推送不再重建）
-  showNextDialog(); // 队列接续
+  currentDialog = null; // 当前弹窗已关闭
+  showNextDialog(); // 队列接续（有排队项才弹）
 }); // 注册
 
 // —— APP 更新：检测 + 弹窗/通知提示，下载由用户确认后触发 ——
@@ -139,6 +143,7 @@ export function checkForUpdates(opts = {}) {
   return serialize(() => doCheckForUpdates(opts)); // 串行化防并发交错（详见 serialize 注释）
 }
 async function doCheckForUpdates({ popup = true, notify = true } = {}) {
+  if (updaterState.status === 'downloading' || updaterState.status === 'downloaded') return updaterState; // 下载中/已下载：检查不得打断（会覆盖状态、丢失安装包路径）
   setApp('checking'); // 检查中
   try {
     // 查 GitHub Releases 最新版元信息
@@ -183,7 +188,7 @@ async function doCheckForUpdates({ popup = true, notify = true } = {}) {
 export async function downloadUpdate() {
   const info = updaterState.info; // 可用版本信息
   if (updaterState.status !== 'available' || !info?.url) return updaterState; // 状态不符不下载
-  setApp('downloading', { version: info.version, percent: 0 }); // 进入下载（0%）
+  setApp('downloading', { version: info.version, url: info.url, percent: 0 }); // 进入下载（保留 url：失败重试用）
   downloadDialogDismissed = false; // 重置"用户已关窗"标志（新一轮下载）
   const pushDownload = (payload) => { // 下载进度推送：用户已手动关窗则不再重建（修复"关不掉的进度弹窗"）
     if (downloadDialogDismissed) return; // 已关闭：静默跳过（完成页仍会必弹）
@@ -224,7 +229,7 @@ export async function downloadUpdate() {
       lastData = Date.now(); // 更新最后数据时间（卡住检测基准）
       if (total) { // 已知总量才报进度
         const percent = Math.round((received / total) * 100); // 百分比
-        setApp('downloading', { version: info.version, percent }); // 面板状态
+        setApp('downloading', { version: info.version, url: info.url, percent }); // 面板状态（保留 url）
         pushDownload({ phase: 'downloading', percent }); // 弹窗进度（已关窗则跳过）
       }
     }
@@ -282,6 +287,7 @@ export function checkDshUpdate(opts = {}) {
   return serialize(() => doCheckDshUpdate(opts)); // 串行化防并发交错（详见 serialize 注释）
 }
 async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
+  if (dshState.status === 'updating') return dshState; // 更新中：检查不得打断安装流程（会覆盖状态、干扰自愈检测）
   const current = await getLocalDshVersion(); // 本机版本
   setDsh('checking', { current }); // 检查中
   if (!current) { setDsh('error', { message: '未检测到 dsh 安装' }); return dshState; } // 无本机版本
@@ -338,13 +344,15 @@ function killTree(pid) {
 // dsh 服务（lib/bin.js web）与 Claude Code 等不受影响。
 function killStaleNpmInstalls() {
   return new Promise((resolve) => {
+    // 修复：匹配条件加 'deepseek-ai/dsh'——只杀本项目的 dsh 安装进程（命令行含 install @deepseek-ai/dsh），
+    // 旧条件 '*npm-cli*install*' 会误杀用户在其他项目/终端并行跑的 npm install
     const ps = spawn('powershell', ['-NoProfile', '-Command', // PowerShell 精准过滤
-      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*npm-cli*install*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
+      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*npm-cli*install*' -and $_.CommandLine -like '*deepseek-ai/dsh*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
       shell: false, // 直接调 powershell
       windowsHide: true // 不弹黑窗
     });
     ps.on('exit', () => resolve()); // 执行完即返回（无残留时静默成功）
-    setTimeout(() => { try { ps.kill(); } catch { /* 忽略 */ } resolve(); }, 10000); // 10 秒兜底
+    setTimeout(() => { try { ps.kill(); } catch { /* 忽略 */ } resolve(); }, 30000); // 30 秒兜底（PowerShell 冷启动 3~10 秒，10 秒会中断清理）
   });
 }
 
@@ -368,23 +376,37 @@ export async function updateDsh({ registry } = {}) {
     showDialog({ phase: 'updating', percent, hint: '' }); // 推送进度（带空 hint：新输出=进展，清除卡住警示）
   };
   showDialog({ phase: 'updating', percent }); // 弹窗切到"正在更新"页（5%）
-  // 卡住检测：60 秒无输出 → 橙字警示 + 系统通知（一次）；5 分钟无输出 → 自动杀进程重试（自愈）
+  // 卡住检测：60 秒无输出 → 橙字警示 + 系统通知（一次）；2 分半真卡死 → 自动杀进程重试（自愈）
+  // 双判据修复：npm 卡死时会往 stderr 刷 spinner 假输出，"无输出"判据被持续刷新永不触发；
+  // 增加"npm 调试日志文件 150 秒无增长"第二判据——日志只在真实安装进展时写入，spinner 骗不了它。
   let lastOutput = Date.now(); // 最后一次收到 npm 输出的时间戳
   let stuckNotified = false; // 本次卡住是否已发过系统通知（防重复骚扰）
   let autoRetried = false; // 是否已自动重试过（只重试一次）
   let currentChild = null; // 当前 npm 子进程（卡住自动处置用）
   let installFinished = false; // 安装是否已结束（成功或最终失败）
+  const logsDir = join(process.env.LOCALAPPDATA || '', 'npm-cache', '_logs'); // npm 调试日志目录（npmEnv 继承同环境变量）
+  let logFile = null; // 本次安装的 npm 日志文件路径
+  let logLastSize = -1; // 日志上次采样大小
+  let logLastChange = Date.now(); // 日志最后变化时间
   const stuckTimer = setInterval(() => {
     if (installFinished) return; // 已结束
-    const idle = Math.round((Date.now() - lastOutput) / 1000); // 已空闲秒数
-    if (idle >= 60) { // 判定卡住
+    const idle = Math.round((Date.now() - lastOutput) / 1000); // 输出已空闲秒数
+    if (logFile) { // 采样日志大小（stat 失败则放弃该判据）
+      try {
+        const size = statSync(logFile).size; // 当前大小
+        if (size !== logLastSize) { logLastSize = size; logLastChange = Date.now(); } // 有增长 → 刷新基准
+      } catch { logFile = null; } // 日志被删/移动 → 退回单判据
+    }
+    const logFrozen = logFile ? Date.now() - logLastChange >= 150000 : false; // 日志 150 秒无增长
+    if (idle >= 60) { // 轻度卡住（输出停）→ 警示
       showDialog({ phase: 'updating', percent, hint: `已 ${idle} 秒没有安装进展：可能网络较慢或连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字（无心跳覆盖，稳定显示）
       if (!stuckNotified) { // 首次卡住 → 系统通知
         stuckNotified = true; // 置标志
         try { new Notification({ title: 'dsh 更新可能卡住了', body: '已超过 1 分钟没有安装进展，请检查网络连接' }).show(); } catch { /* 忽略 */ }
       }
     }
-    if (idle >= 150 && !autoRetried && currentChild) { // 卡死 2 分半且未重试过：自动杀进程并重试（自愈，无需人工介入）
+    const realStuck = logFile ? (idle >= 150 && logFrozen) : idle >= 150; // 真卡死：有日志时双判据，无日志退回输出判据
+    if (realStuck && !autoRetried && currentChild) { // 真卡死 2 分半且未重试过：自动杀进程并重试（自愈）
       autoRetried = true; // 置标志
       lastOutput = Date.now(); // 重置卡住基准
       showDialog({ phase: 'updating', percent, hint: '安装疑似卡住，正在自动重启安装（第 2 次尝试）…' }); // 告知自愈动作
@@ -429,6 +451,17 @@ export async function updateDsh({ registry } = {}) {
         shell: true, // Windows npm.cmd 解析
         windowsHide: true // 不弹黑窗
       });
+      // 定位本次安装的 npm 调试日志（延迟 3 秒：npm 启动后才创建日志文件；文件名带启动时间戳，排序取最新）
+      setTimeout(() => {
+        try {
+          const files = readdirSync(logsDir).filter((f) => f.endsWith('.log')); // 全部日志文件
+          if (files.length) { // 有日志
+            logFile = join(logsDir, files.sort().pop()); // 最新一个
+            logLastSize = statSync(logFile).size; // 初始大小
+            logLastChange = Date.now(); // 初始基准
+          }
+        } catch { logFile = null; } // 目录异常 → 退回单判据
+      }, 3000);
       const feed = (chunk) => { // 处理 npm 输出行：推动进度 + 识别接近完成的行
         const text = chunk.toString('utf8'); // 转字符串
         if (text.trim()) lastOutput = Date.now(); // 有输出即刷新卡住检测基准
@@ -486,9 +519,16 @@ export async function dialogUpdate(registry) {
 }
 
 // 失败页"重试"按钮：用缓存的新版信息重弹确认弹窗（用户重新选源、重新更新）
-// 失败后状态是 error，需先恢复 available（updateDsh 校验 status 才肯执行）
+// 失败后状态是 error，需先恢复 available（updateDsh/downloadUpdate 校验 status 才肯执行）
 export async function dialogRetry() {
-  if (dialogType !== 'dsh') return updaterState; // 仅 dsh 支持重试（APP 下载失败直接重下即可）
+  if (dialogType === 'app') { // APP 下载失败重试：下载中保留的 url 还在，恢复 available 重弹确认窗
+    if (updaterState.info?.url) { // 有下载地址（#14 修复后 downloading 状态保留 url）
+      setApp('available'); // 恢复"有新版"状态
+      showConfirmDialog('app', 'dsh 桌面端', app.getVersion(), updaterState.info.version, updaterState.info.notes); // 重弹确认弹窗
+    }
+    return updaterState; // 返回
+  }
+  if (dialogType !== 'dsh') return updaterState; // 其他类型不支持重试
   if (dshState.latest && dshState.current) { // 有缓存的版本信息
     setDsh('available'); // 恢复"有新版"状态（保留 latest/current/notes 字段）
     showConfirmDialog('dsh', 'dsh 本体', dshState.current, dshState.latest, dshState.notes); // 重弹确认弹窗

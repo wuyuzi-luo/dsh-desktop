@@ -114,8 +114,9 @@ if (!gotLock) {
           loadWebUi(win, `http://127.0.0.1:${getConfig('port')}`); // 已看过引导：直接切到 dsh Web UI
         }
       }
-      if (state === 'error') { // 启动失败
-        notifier?.onServiceError(supervisor.getStderrTail().slice(-200)); // 通知（含诊断尾部）
+      if (state === 'error') { // 启动失败（仅当有诊断输出才通知；运行中静默死亡由心跳回调通知，防双条重复）
+        const tail = supervisor.getStderrTail().slice(-200); // 诊断尾部
+        if (tail.trim()) notifier?.onServiceError(tail); // 有内容才弹
       }
     });
     const result = await supervisor.ensureRunning(); // 确保服务（复用或新起）
