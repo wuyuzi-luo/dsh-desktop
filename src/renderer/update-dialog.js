@@ -95,6 +95,7 @@ function markdownToHtml(md) {
 // 处理主进程推送的弹窗内容
 function render(payload) {
   const phase = payload?.phase ?? 'confirm'; // 目标视图
+  currentPhase = phase; // 记录当前相位（按钮点击分流依据，见上方注释）
   showView(phase); // 切视图
   renderActions(phase); // 切按钮
   if (phase === 'confirm') { // 确认页：填充组件名/版本/更新内容
@@ -147,6 +148,11 @@ function render(payload) {
 // 订阅主进程推送（弹窗内容全部由主进程驱动）
 window.dshDesktop.onUpdateDialog((payload) => render(payload)); // 注册监听
 
+// 当前显示的视图相位（修复：旧实现用 Object.keys(views).find 找可见视图，
+// 但 app-error/dsh-error 归一化为 error 后找回来的是 'error' 而非原始 phase，
+// 导致"dsh 失败页判断 === 'dsh-error'"永不成立、重试按钮实际发送 done 的死路径 bug）
+let currentPhase = null; // 当前相位（render 时更新，按钮点击按它分流）
+
 // 顶部 ✕：直接关闭弹窗（主进程 closed 事件会清引用并弹队列中的下一个）
 document.getElementById('btnClose').addEventListener('click', () => window.close()); // 关闭
 
@@ -155,19 +161,17 @@ btnLater.addEventListener('click', () => { // 确认页"暂不更新"
   window.dshDesktop.updateDialogAction('later'); // 主进程切告知页
 });
 btnLaterRestart.addEventListener('click', () => { // 副按钮：APP 完成页"稍后" / dsh 失败页"重试"
-  const visibleView = Object.keys(views).find((key) => !views[key].hidden); // 当前可见视图
-  if (visibleView === 'dsh-error') { // dsh 失败页 → 重试：主进程用缓存信息重弹确认弹窗
+  if (currentPhase === 'dsh-error') { // dsh 失败页 → 重试：主进程用缓存信息重弹确认弹窗
     window.dshDesktop.updateDialogAction('retry'); // 重弹确认弹窗（重新选源/更新）
   } else { // APP 完成页"稍后"
     window.dshDesktop.updateDialogAction('done'); // 关闭弹窗（可稍后手动运行安装包）
   }
 });
 btnUpdate.addEventListener('click', () => { // 主按钮：按当前视图动作
-  const visibleView = Object.keys(views).find((key) => !views[key].hidden); // 当前可见视图
-  if (visibleView === 'confirm') { // 确认页 → 立即更新（带上所选更新源）
+  if (currentPhase === 'confirm') { // 确认页 → 立即更新（带上所选更新源）
     const registry = document.querySelector('input[name="src"]:checked')?.value; // 所选源（dsh 时有效）
     window.dshDesktop.updateDialogAction('update', { registry }); // 主进程执行下载/npm 更新
-  } else if (visibleView === 'app-done') { // APP 完成页 → 立即重启
+  } else if (currentPhase === 'app-done') { // APP 完成页 → 立即重启
     window.dshDesktop.updateDialogAction('restart'); // 打开安装包 + 退出应用
   } else { // 完成/告知/失败页 → 关闭
     window.dshDesktop.updateDialogAction('done'); // 关闭弹窗

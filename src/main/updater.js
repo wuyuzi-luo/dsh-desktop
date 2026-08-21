@@ -35,6 +35,7 @@ let appDialogShown = false; // APP 确认弹窗本次进程只弹一次（手动
 let dshDialogShown = false; // dsh 确认弹窗本次进程只弹一次（手动检查强制弹时不受限）
 let dialogType = null; // 弹窗当前对应的组件类型（app | dsh）
 let dialogQueue = []; // 待弹弹窗队列（APP 与 dsh 同时有新版时依次弹，避免覆盖）
+let downloadDialogDismissed = false; // 用户在下载期间主动关闭了弹窗（进度推送不再重建窗口，完成页仍必弹）
 
 // 推送全部更新状态给面板（面板若开着）
 function pushState() {
@@ -127,7 +128,10 @@ function showNextDialog() {
 }
 
 // 弹窗窗口关闭回调：继续弹队列中的下一个（window.js closed 事件注入）
-setUpdateDialogClosedHandler(() => showNextDialog()); // 注册
+setUpdateDialogClosedHandler(() => {
+  if (updaterState.status === 'downloading') downloadDialogDismissed = true; // 下载中用户主动关窗：标记（进度推送不再重建）
+  showNextDialog(); // 队列接续
+}); // 注册
 
 // —— APP 更新：检测 + 弹窗/通知提示，下载由用户确认后触发 ——
 // 参数：popup=检测到新版弹应用内弹窗；notify=弹系统通知（面板静默补查时两者都关）
@@ -161,9 +165,11 @@ async function doCheckForUpdates({ popup = true, notify = true } = {}) {
   } catch (err) {
     // 注意：此时 updaterState.status 已被 setApp('checking') 改成 checking，不能再用 status 判断（与 dsh 检查同策略修复）
     const hasKnown = Boolean(updaterState.info?.version); // 之前有成功结论：info 里有版本号
-    if (hasKnown) { // 网络失败：恢复到"有新版"结论（不覆盖，防静默矛盾）
-      setApp('available'); // 恢复状态
-      if (popup === 'force') { // 手动检查失败但已知有新版：用缓存数据重弹
+    if (hasKnown) { // 网络失败：按版本比较恢复正确结论（不覆盖，防静默矛盾）
+      // 修复：up-to-date 时 info 也带 version，旧实现一律恢复 available 会把"已是最新"误报成"有新版"
+      const newer = compareVersions(updaterState.info.version, app.getVersion()) > 0; // 上次结论是否真有新版
+      setApp(newer ? 'available' : 'up-to-date'); // 恢复正确状态
+      if (popup === 'force' && newer) { // 手动检查失败但已知有新版：用缓存数据重弹
         showConfirmDialog('app', 'dsh 桌面端', app.getVersion(), updaterState.info.version, updaterState.info.notes); // 重弹确认窗
       }
     } else { // 从未成功过：才记错误态
@@ -178,7 +184,12 @@ export async function downloadUpdate() {
   const info = updaterState.info; // 可用版本信息
   if (updaterState.status !== 'available' || !info?.url) return updaterState; // 状态不符不下载
   setApp('downloading', { version: info.version, percent: 0 }); // 进入下载（0%）
-  showDialog({ phase: 'downloading', percent: 0 }); // 弹窗切到下载进度页
+  downloadDialogDismissed = false; // 重置"用户已关窗"标志（新一轮下载）
+  const pushDownload = (payload) => { // 下载进度推送：用户已手动关窗则不再重建（修复"关不掉的进度弹窗"）
+    if (downloadDialogDismissed) return; // 已关闭：静默跳过（完成页仍会必弹）
+    showDialog(payload); // 推送/重建窗口
+  };
+  pushDownload({ phase: 'downloading', percent: 0 }); // 弹窗切到下载进度页
   // 卡住检测：60 秒内 0 字节进展 → 弹窗橙字提示原因 + 系统通知（只弹一次）；恢复后自动回默认文案
   let lastData = Date.now(); // 最后收到下载数据的时间戳
   let stuckNotified = false; // 本次卡住是否已发过系统通知（防重复骚扰）
@@ -187,14 +198,14 @@ export async function downloadUpdate() {
     const idle = Math.round((Date.now() - lastData) / 1000); // 已空闲秒数
     const percent = updaterState.info?.percent ?? 0; // 当前进度
     if (idle >= 60) { // 判定卡住
-      showDialog({ phase: 'downloading', percent, hint: `已 ${idle} 秒没有下载数据：可能网络较慢或与 GitHub 连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字
+      pushDownload({ phase: 'downloading', percent, hint: `已 ${idle} 秒没有下载数据：可能网络较慢或与 GitHub 连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字
       if (!stuckNotified) { // 首次卡住 → 系统通知（切到别的窗口也能看到）
         stuckNotified = true; // 置标志
         try { new Notification({ title: '下载可能卡住了', body: '已超过 1 分钟没有下载进展，请检查网络连接' }).show(); } catch { /* 忽略 */ }
       }
     } else if (stuckNotified && idle < 10) { // 已恢复进展
       stuckNotified = false; // 复位
-      showDialog({ phase: 'downloading', percent, hint: '' }); // 恢复正常文案
+      pushDownload({ phase: 'downloading', percent, hint: '' }); // 恢复正常文案
     }
   }, 10000); // 每 10 秒检查一次
   try {
@@ -214,7 +225,7 @@ export async function downloadUpdate() {
       if (total) { // 已知总量才报进度
         const percent = Math.round((received / total) * 100); // 百分比
         setApp('downloading', { version: info.version, percent }); // 面板状态
-        showDialog({ phase: 'downloading', percent }); // 弹窗进度
+        pushDownload({ phase: 'downloading', percent }); // 弹窗进度（已关窗则跳过）
       }
     }
     const buf = Buffer.concat(chunks); // 合并为完整缓冲
@@ -347,7 +358,8 @@ export async function updateDsh({ registry } = {}) {
   updatingDsh = true; // 置标志
   setDsh('updating', { current: dshState.current, latest }); // 更新中
   await stopServiceFn?.(); // 更新前先停服务：避免 npm 替换运行中文件导致服务崩溃（装完会自动重启）
-  await killStaleNpmInstalls(); // 清理上次残留的 npm install 进程（防文件锁导致 placeDep 卡死）
+  // 注：残留进程清理与旧包删除已移进重试循环（每次尝试前都重清——第一次卡死的根因若是文件锁，
+  // 第二次必须重清，否则撞同一把锁自愈必然无效）
   // 进度驱动：只由真实 npm 输出推进（心跳假进度已移除——曾让用户误以为 88% 快完成实际卡死）
   // 无输出时进度条保持不动 + 卡住警示持续显示，真实反映安装状态
   let percent = 5; // 起始进度（正在连接 npm 源）
@@ -394,14 +406,6 @@ export async function updateDsh({ registry } = {}) {
         if (changed) await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n'); // 写回
       }
     } catch { /* overrides 同步失败不阻塞更新（没有 overrides 时走普通安装） */ }
-    // 干净重装策略：删除旧 dsh 包与锁文件后全量安装。
-    // 增量安装（REPLACE 半成品文件）在 Windows 上会卡死在 placeDep 阶段（文件冲突重试循环，实测无解）；
-    // 全量重装全部是全新放置（ADD），稳定不卡（已实测验证：同样环境增量卡死、全量一次通过）。
-    try {
-      await rm(join(dir, 'node_modules', '@deepseek-ai'), { recursive: true, force: true }); // 删旧 dsh 全家桶
-      await rm(join(dir, 'node_modules', '.package-lock.json'), { force: true }); // 删 npm 内部锁
-      await rm(join(dir, 'package-lock.json'), { force: true }); // 删根锁（全量重解析依赖树）
-    } catch { /* 删除失败不阻塞（无此文件时忽略） */ }
     // 更新源：弹窗选择 → --registry 参数（优先级最高，不依赖 .npmrc 文件，选哪个走哪个）
     const registryUrl = registry === 'official' ? OFFICIAL_REGISTRY : MIRROR_REGISTRY; // 官方或镜像
     const npmEnv = { ...process.env }; // 复制环境
@@ -410,6 +414,15 @@ export async function updateDsh({ registry } = {}) {
     let code = null; // 安装退出码（0=成功）
     // 最多两次尝试：第一次卡死自动重试（自愈），第二次仍失败才报错
     for (let attempt = 1; attempt <= 2; attempt++) {
+      // 每次尝试前重清：残留 npm 进程 + 旧包目录与锁文件
+      // （干净重装策略：增量 REPLACE 在 Windows 会卡死 placeDep，全量 ADD 稳定；
+      //  第二次尝试前必须重清——第一次卡死的根因若是文件锁，不重清必然撞同一把锁）
+      await killStaleNpmInstalls(); // 清残留进程
+      try {
+        await rm(join(dir, 'node_modules', '@deepseek-ai'), { recursive: true, force: true }); // 删旧 dsh 全家桶
+        await rm(join(dir, 'node_modules', '.package-lock.json'), { force: true }); // 删 npm 内部锁
+        await rm(join(dir, 'package-lock.json'), { force: true }); // 删根锁（全量重解析依赖树）
+      } catch { /* 删除失败不阻塞（无此文件时忽略） */ }
       currentChild = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit', '--registry', registryUrl], {
         cwd: dir, // 安装目录为工作目录
         env: npmEnv, // 环境（无 TLS 豁免变量）
@@ -444,6 +457,9 @@ export async function updateDsh({ registry } = {}) {
     if (code !== 0) { // 两次尝试后仍失败
       setDsh('error', { message: tail.trim() || 'dsh 更新失败' }); // 记错误态（带真实原因）
       showDialog({ phase: 'dsh-error', message: tail.trim() }); // 弹窗提示失败并展示 npm 输出原因（下方附镜像建议）
+      // 修复：更新前停了服务、删了包，失败必须尝试拉回服务（入口缺失会进 missing 态引导重新安装，
+      // 不能停在 stopped——用户工作台会彻底停摆且无法自助恢复）
+      restartServiceFn?.(); // 尝试重启（成功=旧版服务复活；失败=missing 引导，都好过停摆）
       return dshState; // 返回
     }
     setDsh('up-to-date', { current: latest, latest }); // 更新完成
