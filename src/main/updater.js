@@ -6,7 +6,7 @@
 
 import { app, shell, Notification } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
 import { join } from 'node:path'; // 路径拼接
-import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 文件写出/读取
+import { writeFile, mkdir, readFile, rm } from 'node:fs/promises'; // 文件写出/读取/删除
 import { spawn } from 'node:child_process'; // npm 更新 dsh 用
 import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler } from './window.js'; // 主窗口引用 + 更新弹窗
 import { getConfig } from './config.js'; // 配置读取
@@ -394,6 +394,14 @@ export async function updateDsh({ registry } = {}) {
         if (changed) await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n'); // 写回
       }
     } catch { /* overrides 同步失败不阻塞更新（没有 overrides 时走普通安装） */ }
+    // 干净重装策略：删除旧 dsh 包与锁文件后全量安装。
+    // 增量安装（REPLACE 半成品文件）在 Windows 上会卡死在 placeDep 阶段（文件冲突重试循环，实测无解）；
+    // 全量重装全部是全新放置（ADD），稳定不卡（已实测验证：同样环境增量卡死、全量一次通过）。
+    try {
+      await rm(join(dir, 'node_modules', '@deepseek-ai'), { recursive: true, force: true }); // 删旧 dsh 全家桶
+      await rm(join(dir, 'node_modules', '.package-lock.json'), { force: true }); // 删 npm 内部锁
+      await rm(join(dir, 'package-lock.json'), { force: true }); // 删根锁（全量重解析依赖树）
+    } catch { /* 删除失败不阻塞（无此文件时忽略） */ }
     // 更新源：弹窗选择 → --registry 参数（优先级最高，不依赖 .npmrc 文件，选哪个走哪个）
     const registryUrl = registry === 'official' ? OFFICIAL_REGISTRY : MIRROR_REGISTRY; // 官方或镜像
     const npmEnv = { ...process.env }; // 复制环境
