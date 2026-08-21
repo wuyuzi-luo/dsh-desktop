@@ -98,8 +98,8 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   downloadUpdate: () => ipcRenderer.invoke(IPC.UPDATER_DOWNLOAD), // 确认下载 APP 更新
   updateDsh: () => ipcRenderer.invoke(IPC.UPDATER_DSH_UPDATE), // 确认更新 dsh
   quietCheckAll: () => ipcRenderer.invoke(IPC.UPDATER_QUIET_CHECK_ALL), // 面板打开全量静默检查（APP+dsh）
-  // 更新弹窗：按钮动作回传（update/later/restart/done）
-  updateDialogAction: (action) => ipcRenderer.invoke(IPC.UPDATE_DIALOG_ACTION, action),
+  // 更新弹窗：按钮动作回传（update/later/restart/done；extra 附带回传数据，如 update 时的 registry 选择）
+  updateDialogAction: (action, extra) => ipcRenderer.invoke(IPC.UPDATE_DIALOG_ACTION, action, extra),
   // 更新弹窗：订阅主进程内容推送（返回退订函数）
   onUpdateDialog: (cb) => {
     const listener = (_e, payload) => cb(payload); // 包装

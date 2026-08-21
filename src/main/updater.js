@@ -9,7 +9,7 @@ import { join } from 'node:path'; // 路径拼接
 import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 文件写出/读取
 import { spawn } from 'node:child_process'; // npm 更新 dsh 用
 import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler } from './window.js'; // 主窗口引用 + 更新弹窗
-import { getConfig } from './config.js'; // 配置读取
+import { getConfig, setConfig } from './config.js'; // 配置读取/写入
 
 // 用户网络环境（MITM 代理/杀软证书劫持）下 undici fetch 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE，
 // 与打包工具链同策略关闭证书校验（个人工具，仓库与安装包均有签名，风险可接受）
@@ -17,6 +17,9 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 // GitHub 发布仓库（与 electron-builder.yml 的 publish 配置一致）
 const REPO = 'wuyuzi-luo/dsh-desktop';
+// dsh 本体更新可选源（弹窗内用户自选；--registry 参数实现，不改任何配置文件）
+const MIRROR_REGISTRY = 'https://registry.npmmirror.com'; // 国内镜像（快）
+const OFFICIAL_REGISTRY = 'https://registry.npmjs.org'; // 官方源（慢但原汁原味）
 // dsh 官方仓库（拿本体更新说明用）
 const DSH_REPO = 'deepseek-ai/deepseek-harness';
 // APP 更新状态缓存（面板拉取用）
@@ -106,7 +109,10 @@ function showDialog(payload) {
 // 弹"发现新版本"确认弹窗（组件名 + 版本对比 + 更新内容 + 更新/暂不更新按钮）
 // 入队方式弹出：APP 与 dsh 同时有新版时先弹 APP，用户处理完后自动弹 dsh（不互相覆盖）
 function showConfirmDialog(type, label, current, latest, notes) {
-  enqueueDialog({ phase: 'confirm', type, label, current, latest, notes: notes || '' }); // 入队确认页
+  enqueueDialog({ // 入队确认页
+    phase: 'confirm', type, label, current, latest, notes: notes || '',
+    registry: getConfig('updateRegistry') ?? 'mirror' // 上次选择的更新源（弹窗默认选中）
+  });
 }
 
 // 弹窗队列：入队；当前无弹窗时立即弹（有则等当前弹窗关闭后由 onDialogClosed 接续）
@@ -310,22 +316,22 @@ async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
 }
 
 // 用户确认后更新 dsh：npm install 到安装目录 → 重启服务生效
-export async function updateDsh() {
+// registry：'mirror'=国内镜像 / 'official'=官方源（弹窗内用户自选，--registry 参数直接生效）
+export async function updateDsh({ registry } = {}) {
   const latest = dshState.latest; // 目标版本
   if (dshState.status !== 'available' || !latest) return dshState; // 状态不符
   if (updatingDsh) return dshState; // 防重入
   updatingDsh = true; // 置标志
   setDsh('updating', { current: dshState.current, latest }); // 更新中
   await stopServiceFn?.(); // 更新前先停服务：避免 npm 替换运行中文件导致服务崩溃（装完会自动重启）
-  // 进度驱动：npm install 没有真实百分比输出，用"起始 5% + 输出行/心跳逐步上涨"模拟
-  // 让用户明确感知更新在推进（封顶 88%，收到 added/changed 行跳到 92%，完成直接进完成页）
+  // 进度驱动：只由真实 npm 输出推进（心跳假进度已移除——曾让用户误以为 88% 快完成实际卡死）
+  // 无输出时进度条保持不动 + 卡住警示持续显示，真实反映安装状态
   let percent = 5; // 起始进度（正在连接 npm 源）
-  const bump = (n) => { // 上涨进度并推送弹窗
-    percent = Math.min(88, percent + n); // 封顶 88%（最后 12% 留给安装收尾）
-    showDialog({ phase: 'updating', percent }); // 推送进度
+  const bump = (n) => { // 有真实输出才上涨进度并推送弹窗
+    percent = Math.min(92, percent + n); // 封顶 92%（最后 8% 留给安装收尾）
+    showDialog({ phase: 'updating', percent, hint: '' }); // 推送进度（带空 hint：新输出=进展，清除卡住警示）
   };
   showDialog({ phase: 'updating', percent }); // 弹窗切到"正在更新"页（5%）
-  const heartbeat = setInterval(() => bump(2), 4000); // 心跳：每 4 秒 +2%（无输出时也保证进度前进）
   // 卡住检测：60 秒无任何 npm 输出 → 弹窗橙字提示原因 + 系统通知（只弹一次）；恢复后自动回默认文案
   let lastOutput = Date.now(); // 最后一次收到 npm 输出的时间戳
   let stuckNotified = false; // 本次卡住是否已发过系统通知（防重复骚扰）
@@ -333,7 +339,7 @@ export async function updateDsh() {
     if (dshState.status !== 'updating') return; // 更新已结束
     const idle = Math.round((Date.now() - lastOutput) / 1000); // 已空闲秒数
     if (idle >= 60) { // 判定卡住
-      showDialog({ phase: 'updating', percent, hint: `已 ${idle} 秒没有安装进展：可能网络较慢或连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字
+      showDialog({ phase: 'updating', percent, hint: `已 ${idle} 秒没有安装进展：可能网络较慢或连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字（无心跳覆盖，稳定显示）
       if (!stuckNotified) { // 首次卡住 → 系统通知
         stuckNotified = true; // 置标志
         try { new Notification({ title: 'dsh 更新可能卡住了', body: '已超过 1 分钟没有安装进展，请检查网络连接' }).show(); } catch { /* 忽略 */ }
@@ -358,8 +364,13 @@ export async function updateDsh() {
         if (changed) await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n'); // 写回
       }
     } catch { /* overrides 同步失败不阻塞更新（没有 overrides 时走普通安装） */ }
-    const child = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit'], {
+    // 更新源：弹窗选择 → --registry 参数（优先级最高，不依赖 .npmrc 文件，选哪个走哪个）
+    const registryUrl = registry === 'official' ? OFFICIAL_REGISTRY : MIRROR_REGISTRY; // 官方或镜像
+    const npmEnv = { ...process.env }; // 复制环境
+    delete npmEnv.NODE_TLS_REJECT_UNAUTHORIZED; // 剔除证书豁免变量（防 npm 打印误导性警告）
+    const child = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit', '--registry', registryUrl], {
       cwd: dir, // 安装目录为工作目录
+      env: npmEnv, // 环境（无 TLS 豁免变量）
       shell: true, // Windows npm.cmd 解析
       windowsHide: true // 不弹黑窗
     });
@@ -397,7 +408,6 @@ export async function updateDsh() {
       n.show(); // 弹出
     } catch { /* 通知失败忽略 */ }
   } finally {
-    clearInterval(heartbeat); // 停止进度心跳（任何路径）
     clearInterval(stuckTimer); // 停止卡住检测（更新结束）
     updatingDsh = false; // 复位
   }
@@ -405,9 +415,11 @@ export async function updateDsh() {
 }
 
 // 弹窗"立即更新"按钮：按弹窗当前组件类型执行对应更新链路
-export async function dialogUpdate() {
+// registry：dsh 更新时用户在弹窗里选的更新源（mirror/official），顺手记住偏好
+export async function dialogUpdate(registry) {
+  if (registry === 'mirror' || registry === 'official') setConfig('updateRegistry', registry); // 记住本次选择（下次默认）
   if (dialogType === 'app') return downloadUpdate(); // APP → 下载安装包（进度/完成弹窗自动接续）
-  if (dialogType === 'dsh') return updateDsh(); // dsh → npm 更新（完成弹窗自动接续）
+  if (dialogType === 'dsh') return updateDsh({ registry }); // dsh → npm 更新（按所选源）
   return updaterState; // 无类型（异常）→ 原样返回
 }
 

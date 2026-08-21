@@ -98,6 +98,16 @@ function render(payload) {
     document.getElementById('verCurrent').textContent = '当前 v' + (payload.current ?? '-'); // 当前版本
     document.getElementById('verLatest').textContent = '新版本 v' + (payload.latest ?? '-'); // 新版本
     document.getElementById('notes').innerHTML = markdownToHtml(payload.notes ?? ''); // 更新内容（Markdown 转排版）
+    // 更新源选择：仅 dsh 本体更新显示，默认选中上次选择的源
+    const srcPick = document.getElementById('srcPick'); // 源选择行
+    if (payload.type === 'dsh') { // dsh 更新才有源选择
+      srcPick.hidden = false; // 显示
+      const preferred = payload.registry === 'official' ? 'official' : 'mirror'; // 上次偏好（默认镜像）
+      const radio = srcPick.querySelector(`input[name="src"][value="${preferred}"]`); // 对应单选
+      if (radio) radio.checked = true; // 选中
+    } else { // APP 更新：隐藏
+      srcPick.hidden = true; // 隐藏
+    }
   } else if (phase === 'downloading') { // APP 下载进度
     document.getElementById('dlBar').style.width = (payload.percent ?? 0) + '%'; // 进度条
     document.getElementById('dlPercent').textContent = (payload.percent ?? 0) + '%'; // 百分比
@@ -140,8 +150,9 @@ btnLaterRestart.addEventListener('click', () => { // APP 完成页"稍后"
 });
 btnUpdate.addEventListener('click', () => { // 主按钮：按当前视图动作
   const visibleView = Object.keys(views).find((key) => !views[key].hidden); // 当前可见视图
-  if (visibleView === 'confirm') { // 确认页 → 立即更新
-    window.dshDesktop.updateDialogAction('update'); // 主进程执行下载/npm 更新
+  if (visibleView === 'confirm') { // 确认页 → 立即更新（带上所选更新源）
+    const registry = document.querySelector('input[name="src"]:checked')?.value; // 所选源（dsh 时有效）
+    window.dshDesktop.updateDialogAction('update', { registry }); // 主进程执行下载/npm 更新
   } else if (visibleView === 'app-done') { // APP 完成页 → 立即重启
     window.dshDesktop.updateDialogAction('restart'); // 打开安装包 + 退出应用
   } else { // 完成/告知/失败页 → 关闭

@@ -140,6 +140,31 @@ html, body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* 更新源选择（确认页，仅 dsh 更新显示） */
+.src-pick {
+  -webkit-app-region: no-drag; /* 单选不参与拖动 */
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: #161b22; /* 卡片底 */
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.src-pick[hidden] { display: none; } /* 显式覆盖 flex */
+.src-label { color: #8b949e; font-size: 12px; } /* "更新源"标签 */
+.src-opt {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #c9d1d9;
+  font-size: 12.5px;
+  cursor: pointer;
+  -webkit-app-region: no-drag; /* 单选不参与拖动 */
+}
+.src-opt input { accent-color: #4a6cf7; cursor: pointer; } /* 单选强调色 */
+
 /* 底部按钮行：右对齐（与 dsh 设置页操作区一致） */
 .actions {
   -webkit-app-region: no-drag; /* 按钮不参与拖动 */

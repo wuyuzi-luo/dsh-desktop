@@ -14,7 +14,7 @@
       <button class="iconbtn" id="btnClose" title="关闭">✕</button>
     </header>
 
-    <!-- 确认页：检测到新版本（左对齐排版 + 可滚动更新内容） -->
+    <!-- 确认页：检测到新版本（左对齐排版 + 可滚动更新内容 + 更新源选择） -->
     <section id="view-confirm" class="view" hidden>
       <div class="title-main" id="confirmTitle">已检测到新版本</div>
       <div class="versions">
@@ -24,6 +24,12 @@
       </div>
       <div class="notes-label">更新内容</div>
       <div class="notes" id="notes"></div>
+      <!-- 更新源选择（仅 dsh 本体更新显示；APP 更新走 GitHub CDN 无需选择） -->
+      <div class="src-pick" id="srcPick" hidden>
+        <span class="src-label">更新源</span>
+        <label class="src-opt"><input type="radio" name="src" value="mirror" /> 国内镜像（快，推荐）</label>
+        <label class="src-opt"><input type="radio" name="src" value="official" /> 官方源</label>
+      </div>
     </section>
 
     <!-- 下载中：APP 安装包下载进度（卡住时 hint 变橙色警示） -->

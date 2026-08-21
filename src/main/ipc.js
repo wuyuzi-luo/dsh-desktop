@@ -253,10 +253,10 @@ export function registerIpc(deps) {
   });
 
   // 更新弹窗按钮动作：update=立即更新 / later=暂不更新 / restart=立即重启 / done=关闭
-  ipcMain.handle(IPC.UPDATE_DIALOG_ACTION, async (_e, action) => {
+  ipcMain.handle(IPC.UPDATE_DIALOG_ACTION, async (_e, action, extra) => {
     const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用
-    if (action === 'update') { // 立即更新：按弹窗组件类型执行下载/npm 更新
-      return updater ? updater.dialogUpdate() : null; // 更新链路内部自动接续进度/完成弹窗
+    if (action === 'update') { // 立即更新：按弹窗组件类型执行下载/npm 更新（extra.registry=dsh 更新源选择）
+      return updater ? updater.dialogUpdate(extra?.registry) : null; // 更新链路内部自动接续进度/完成弹窗
     }
     if (action === 'later') { // 暂不更新：弹窗切告知页
       pushUpdateDialog({ phase: 'deferred' }); // 告知可在控制面板更新
