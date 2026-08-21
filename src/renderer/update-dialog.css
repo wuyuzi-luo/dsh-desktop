@@ -164,6 +164,21 @@ html, body {
   -webkit-app-region: no-drag; /* 单选不参与拖动 */
 }
 .src-opt input { accent-color: #4a6cf7; cursor: pointer; } /* 单选强调色 */
+.src-note { /* 源选择下方的注意说明（橙色警示色） */
+  -webkit-app-region: no-drag; /* 不参与拖动 */
+  color: #f0883e; /* 警示橙 */
+  font-size: 11.5px;
+  line-height: 1.6;
+  text-align: left;
+}
+.src-note[hidden] { display: none; } /* 显式覆盖 */
+.err-suggest { /* 失败页镜像建议行 */
+  color: #f0883e; /* 警示橙 */
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+.err-suggest[hidden] { display: none; } /* 显式覆盖 */
 
 /* 底部按钮行：右对齐（与 dsh 设置页操作区一致） */
 .actions {

@@ -30,6 +30,8 @@
         <label class="src-opt"><input type="radio" name="src" value="mirror" /> 国内镜像（快，推荐）</label>
         <label class="src-opt"><input type="radio" name="src" value="official" /> 官方源</label>
       </div>
+      <!-- 源选择说明（用户要求：官方源易受网络波动影响） -->
+      <div class="src-note" id="srcNote" hidden>注意：官方源可能会受网络波动而下载失败，若选择官方源，请检查网络是否通畅，若下载失败请用镜像下载！</div>
     </section>
 
     <!-- 下载中：APP 安装包下载进度（卡住时 hint 变橙色警示） -->
@@ -77,6 +79,8 @@
       <div class="title-main" id="errorTitle">更新失败</div>
       <div class="hint" style="text-align:center">请检查网络后稍后重试，或打开控制面板（Ctrl+Shift+D）重新更新</div>
       <div class="hint err-detail" id="errorDetail" hidden></div>
+      <!-- dsh 更新失败时建议换镜像（用户要求） -->
+      <div class="hint err-suggest" id="errSuggest" hidden>建议重新选择镜像源下载（本镜像源来自阿里镜像源）</div>
     </section>
 
     <!-- 底部按钮行：右对齐 -->

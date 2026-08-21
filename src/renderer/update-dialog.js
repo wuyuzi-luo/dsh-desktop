@@ -98,15 +98,17 @@ function render(payload) {
     document.getElementById('verCurrent').textContent = '当前 v' + (payload.current ?? '-'); // 当前版本
     document.getElementById('verLatest').textContent = '新版本 v' + (payload.latest ?? '-'); // 新版本
     document.getElementById('notes').innerHTML = markdownToHtml(payload.notes ?? ''); // 更新内容（Markdown 转排版）
-    // 更新源选择：仅 dsh 本体更新显示，默认选中上次选择的源
+    // 更新源选择：仅 dsh 本体更新显示；每次默认"国内镜像"，由用户自己决定（不记忆上次选择）
     const srcPick = document.getElementById('srcPick'); // 源选择行
+    const srcNote = document.getElementById('srcNote'); // 源选择说明
     if (payload.type === 'dsh') { // dsh 更新才有源选择
       srcPick.hidden = false; // 显示
-      const preferred = payload.registry === 'official' ? 'official' : 'mirror'; // 上次偏好（默认镜像）
-      const radio = srcPick.querySelector(`input[name="src"][value="${preferred}"]`); // 对应单选
-      if (radio) radio.checked = true; // 选中
+      srcNote.hidden = false; // 显示注意说明
+      const radio = srcPick.querySelector('input[name="src"][value="mirror"]'); // 默认镜像
+      if (radio) radio.checked = true; // 每次默认选中镜像
     } else { // APP 更新：隐藏
       srcPick.hidden = true; // 隐藏
+      srcNote.hidden = true; // 隐藏
     }
   } else if (phase === 'downloading') { // APP 下载进度
     document.getElementById('dlBar').style.width = (payload.percent ?? 0) + '%'; // 进度条
@@ -123,15 +125,17 @@ function render(payload) {
   } else if (phase === 'app-error') { // APP 下载失败
     document.getElementById('errorTitle').textContent = '安装包下载失败'; // 失败标题
     document.getElementById('errorDetail').hidden = true; // 无详细原因
+    document.getElementById('errSuggest').hidden = true; // APP 失败不显示镜像建议（与镜像无关）
   } else if (phase === 'dsh-error') { // dsh 更新失败
     document.getElementById('errorTitle').textContent = 'dsh 本体更新失败'; // 失败标题
     const detail = document.getElementById('errorDetail'); // 失败原因元素
-    if (payload.message) { // 有 npm 输出原因（如 overrides 冲突/网络错误）
+    if (payload.message) { // 有 npm 输出原因（如网络错误）
       detail.hidden = false; // 显示
       detail.textContent = String(payload.message).slice(0, 500); // 截断展示
     } else { // 无详细原因
       detail.hidden = true; // 隐藏
     }
+    document.getElementById('errSuggest').hidden = false; // 显示镜像建议（用户要求）
   }
 }
 

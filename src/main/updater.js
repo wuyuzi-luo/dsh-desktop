@@ -9,7 +9,7 @@ import { join } from 'node:path'; // 路径拼接
 import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 文件写出/读取
 import { spawn } from 'node:child_process'; // npm 更新 dsh 用
 import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler } from './window.js'; // 主窗口引用 + 更新弹窗
-import { getConfig, setConfig } from './config.js'; // 配置读取/写入
+import { getConfig } from './config.js'; // 配置读取
 
 // 用户网络环境（MITM 代理/杀软证书劫持）下 undici fetch 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE，
 // 与打包工具链同策略关闭证书校验（个人工具，仓库与安装包均有签名，风险可接受）
@@ -109,10 +109,7 @@ function showDialog(payload) {
 // 弹"发现新版本"确认弹窗（组件名 + 版本对比 + 更新内容 + 更新/暂不更新按钮）
 // 入队方式弹出：APP 与 dsh 同时有新版时先弹 APP，用户处理完后自动弹 dsh（不互相覆盖）
 function showConfirmDialog(type, label, current, latest, notes) {
-  enqueueDialog({ // 入队确认页
-    phase: 'confirm', type, label, current, latest, notes: notes || '',
-    registry: getConfig('updateRegistry') ?? 'mirror' // 上次选择的更新源（弹窗默认选中）
-  });
+  enqueueDialog({ phase: 'confirm', type, label, current, latest, notes: notes || '' }); // 入队确认页（源选择每次默认镜像，不记忆）
 }
 
 // 弹窗队列：入队；当前无弹窗时立即弹（有则等当前弹窗关闭后由 onDialogClosed 接续）
@@ -415,9 +412,8 @@ export async function updateDsh({ registry } = {}) {
 }
 
 // 弹窗"立即更新"按钮：按弹窗当前组件类型执行对应更新链路
-// registry：dsh 更新时用户在弹窗里选的更新源（mirror/official），顺手记住偏好
+// registry：dsh 更新时用户在弹窗里选的更新源（mirror/official）；不记忆，每次由客户决定
 export async function dialogUpdate(registry) {
-  if (registry === 'mirror' || registry === 'official') setConfig('updateRegistry', registry); // 记住本次选择（下次默认）
   if (dialogType === 'app') return downloadUpdate(); // APP → 下载安装包（进度/完成弹窗自动接续）
   if (dialogType === 'dsh') return updateDsh({ registry }); // dsh → npm 更新（按所选源）
   return updaterState; // 无类型（异常）→ 原样返回
