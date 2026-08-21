@@ -113,12 +113,13 @@ export function createHostSupervisor() {
     // 剔除主进程为自身网络设置的证书豁免变量：它会被子进程继承，
     // dsh 启动时打印 "NODE_TLS_REJECT_UNAUTHORIZED...insecure" 警告，被错误页显示后误导用户以为是错误原因
     delete env.NODE_TLS_REJECT_UNAUTHORIZED; // 不传递给 dsh 服务
-    child = spawn('node', [cliEntry, 'web', '--port', String(port)], {
+    child = spawn('node', [cliEntry, 'web', '--port', String(port), '--no-open'], {
       cwd, // 工作目录
       env, // 环境变量
       stdio: ['ignore', 'pipe', 'pipe'], // 关 stdin，接管 stdout/stderr
       windowsHide: true // 不弹黑窗
     }); // 直接 node 起 bin.js（PID 即服务本体；--port 必须传：否则 dsh 起默认 3080，与探测/心跳端口不一致会被心跳误杀）
+    // --no-open：dsh 0.1.1-rc.1 起 web 命令默认自动打开浏览器，桌面端有自己的窗口，禁用（否则每次启动都弹浏览器标签页）
     owned = true; // 标记为自己托管
 
     // 就绪等待：stdout 解析为主
