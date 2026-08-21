@@ -133,13 +133,15 @@ async function doCheckForUpdates({ popup = true, notify = true } = {}) {
     }
     if (notify) notifyAvailable('dsh 桌面新版本可用', `发现 v${remote}（当前 v${app.getVersion()}），可在控制面板更新`); // 系统通知双保险
   } catch (err) {
-    const known = updaterState.status === 'available' || updaterState.status === 'up-to-date' || updaterState.status === 'downloaded'; // 之前已确认过结果
-    if (known) { // 网络失败：不覆盖已确认状态（与 dsh 检查同策略，防矛盾现象）
-      if (popup === 'force' && updaterState.info?.version) { // 手动检查失败但已知有新版：用缓存数据重弹
+    // 注意：此时 updaterState.status 已被 setApp('checking') 改成 checking，不能再用 status 判断（与 dsh 检查同策略修复）
+    const hasKnown = Boolean(updaterState.info?.version); // 之前有成功结论：info 里有版本号
+    if (hasKnown) { // 网络失败：恢复到"有新版"结论（不覆盖，防静默矛盾）
+      setApp('available'); // 恢复状态
+      if (popup === 'force') { // 手动检查失败但已知有新版：用缓存数据重弹
         showConfirmDialog('app', 'dsh 桌面端', app.getVersion(), updaterState.info.version, updaterState.info.notes); // 重弹确认窗
       }
-    } else { // 首次检查就失败：才记错误态
-      setApp('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
+    } else { // 从未成功过：才记错误态
+      setApp('error', { message: String(err?.message ?? err) }); // 记错误态
     }
   }
   return updaterState; // 返回状态
@@ -268,13 +270,17 @@ async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
     }
     if (notify) notifyAvailable('dsh 本体新版本可用', `dsh v${latest} 已发布（当前 v${current}），可在控制面板更新`); // 系统通知双保险
   } catch (err) {
-    const known = dshState.status === 'available' || dshState.status === 'up-to-date'; // 之前已确认过结果
-    if (known) { // 网络失败：不覆盖已确认状态（避免"弹窗说新版、面板报失败"矛盾）
-      if (popup === 'force' && dshState.latest && dshState.current && compareVersions(dshState.latest, dshState.current) > 0) {
-        showConfirmDialog('dsh', 'dsh 本体', dshState.current, dshState.latest, dshState.notes); // 用缓存数据重弹（用户仍可更新）
+    // 注意：此时 dshState.status 已被上面 setDsh('checking') 改成 checking，不能再用 status 判断"之前是否确认过结果"
+    // （旧实现恒为 false → 失败就覆盖 error → 面板又不弹消息框 → 用户点检查更新完全静默）
+    const hasKnown = Boolean(dshState.latest && dshState.current); // 之前有成功结论：latest/current 字段仍在
+    if (hasKnown) { // 网络失败：恢复到上次结论（不覆盖，防静默矛盾）
+      const newer = compareVersions(dshState.latest, dshState.current) > 0; // 上次结论是有新版？
+      setDsh(newer ? 'available' : 'up-to-date'); // 恢复状态
+      if (popup === 'force' && newer) { // 手动检查失败但已知有新版：用缓存数据重弹（用户仍可更新）
+        showConfirmDialog('dsh', 'dsh 本体', dshState.current, dshState.latest, dshState.notes); // 重弹确认弹窗
       }
-    } else { // 首次检查就失败：才记错误态
-      setDsh('error', { message: String(err?.message ?? err) }); // 记错误态（静默）
+    } else { // 从未成功过：才记错误态
+      setDsh('error', { message: String(err?.message ?? err) }); // 记错误态
     }
   }
   return dshState; // 返回状态
