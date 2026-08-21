@@ -58,7 +58,7 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   // 选择 dsh 安装目录（boot 页 missing 态引导）
   pickDshDir: () => ipcRenderer.invoke(IPC.SETUP_PICK_DSH_DIR),
   // 自动安装 dsh（boot 页 missing 态"帮我安装"）
-  autoInstallDsh: () => ipcRenderer.invoke(IPC.SETUP_AUTO_INSTALL),
+  autoInstallDsh: (opts) => ipcRenderer.invoke(IPC.SETUP_AUTO_INSTALL, opts), // 自动安装（opts.registry=安装源选择）
   // 检测 Node.js 是否安装且版本达标
   checkNode: () => ipcRenderer.invoke(IPC.SETUP_CHECK_NODE),
   // 引导页"进入工作台"

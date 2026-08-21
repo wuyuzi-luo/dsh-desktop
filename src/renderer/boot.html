@@ -32,6 +32,13 @@
       <!-- 三选项（检测到 Node 后才显示） -->
       <div class="setup-btns" id="setup-btns" hidden>
         <button class="btn primary" id="install-dsh">帮我安装 DeepSeek Harness</button>
+        <!-- 安装源选择（自动安装用；与更新弹窗一致，由用户自选；随三选项一起显示） -->
+        <div class="src-pick" id="install-src">
+          <span class="src-label">安装源</span>
+          <label class="src-opt"><input type="radio" name="install-src" value="mirror" checked /> 国内镜像（快，推荐）</label>
+          <label class="src-opt"><input type="radio" name="install-src" value="official" /> 官方源</label>
+        </div>
+        <div class="src-note" id="install-src-note">注意：官方源可能会受网络波动而下载失败，若选择官方源，请检查网络是否通畅，若下载失败请用镜像下载！</div>
         <button class="btn" id="pick-dir">选择 DeepSeek Harness 已安装的目录文件</button>
         <!-- 选择目录的说明：告诉用户要选什么样的目录 -->
         <div class="pick-note">请选择包含 node_modules\@deepseek-ai\dsh 的安装目录<br>（例如 D:\deepseek-harness）</div>

@@ -93,11 +93,11 @@ export function registerIpc(deps) {
   ipcMain.handle(IPC.SETUP_CHECK_NODE, () => checkNodeVersion()); // 返回 { ok, version }
 
   // 自动安装 dsh（boot 页 missing 态"帮我安装"）：Node 检测 → npm install → 校验 → 写配置 → 重启
-  ipcMain.handle(IPC.SETUP_AUTO_INSTALL, async () => {
+  ipcMain.handle(IPC.SETUP_AUTO_INSTALL, async (_e, opts) => {
     if (installing) return { error: 'busy' }; // 防重复点击
     installing = true; // 置防重入标志
     try {
-      return await autoInstallDsh(deps); // 主流程
+      return await autoInstallDsh(deps, opts?.registry); // 主流程（registry=安装源选择）
     } finally {
       installing = false; // 复位
     }
@@ -288,7 +288,8 @@ export function registerIpc(deps) {
 }
 
 // 自动安装 dsh 主流程（独立函数：逻辑长，与注册代码分开）
-async function autoInstallDsh(deps) {
+// registry：'mirror'=国内镜像（默认） / 'official'=官方源（boot 页用户自选，--registry 参数生效）
+async function autoInstallDsh(deps, registry) {
   const { supervisor } = deps; // 依赖解构（重启服务用）
   const win = getMainWindow(); // boot 页窗口
   const push = (phase, text) => pushBootState(win, { type: 'setup', phase, text }); // 进度推送便捷函数
@@ -324,10 +325,11 @@ async function autoInstallDsh(deps) {
   });
 
   // 4. npm install（shell:true 保证 Windows 下 npm.cmd 可解析；windowsHide 不弹黑窗）
-  // --registry 镜像：首次安装下载 200+ 包，国内镜像实测比官方源快 6 倍且稳定
+  // --registry 按用户所选源（boot 页自选；默认镜像：首次安装 200+ 包，镜像实测比官方源快 6 倍且稳定）
+  const registryUrl = registry === 'official' ? 'https://registry.npmjs.org' : 'https://registry.npmmirror.com'; // 官方或镜像
   const npmEnv = { ...process.env }; // 复制环境
   delete npmEnv.NODE_TLS_REJECT_UNAUTHORIZED; // 剔除证书豁免变量（防 npm 打印误导性警告）
-  const child = spawn('npm', ['install', '@deepseek-ai/dsh', '--no-fund', '--no-audit', '--registry', 'https://registry.npmmirror.com'], {
+  const child = spawn('npm', ['install', '@deepseek-ai/dsh', '--no-fund', '--no-audit', '--registry', registryUrl], {
     cwd: target, // 安装到目标目录
     env: npmEnv, // 环境（无 TLS 豁免变量）
     shell: true, // Windows 批处理包装

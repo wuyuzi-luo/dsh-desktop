@@ -126,7 +126,9 @@ pickDirBtn.addEventListener('click', async () => {
 installBtn.addEventListener('click', async () => {
   setSetupEnabled(false); // 安装期间禁用全部选项
   subEl.textContent = '正在检测环境…'; // 立即反馈
-  const result = await window.dshDesktop.autoInstallDsh(); // 调主进程（期间进度经 setup 事件推送）
+  // 读取用户选择的安装源（mirror=国内镜像默认 / official=官方源）
+  const registry = document.querySelector('input[name="install-src"]:checked')?.value; // 所选源
+  const result = await window.dshDesktop.autoInstallDsh({ registry }); // 调主进程（期间进度经 setup 事件推送）
   if (!result) { // 异常（理论上不会发生）
     setSetupEnabled(true); // 恢复按钮
     return;

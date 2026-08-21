@@ -78,3 +78,35 @@ body {
   font-family: Consolas, "Courier New", monospace; white-space: pre-wrap; word-break: break-all;
   user-select: text;
 }
+
+/* 安装源选择（自动安装"帮我安装"下方，与更新弹窗同款交互） */
+.src-pick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: rgba(10, 15, 31, 0.5);
+  border: 1px solid rgba(77, 107, 254, 0.2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 8px;
+}
+.src-pick[hidden] { display: none; }
+.src-label { color: #7d8bb8; font-size: 12px; }
+.src-opt {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #c9d1d9;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.src-opt input { accent-color: #4d6bfe; cursor: pointer; }
+.src-note {
+  color: #f0883e;
+  font-size: 11.5px;
+  line-height: 1.6;
+  text-align: left;
+  margin-top: 6px;
+}
+.src-note[hidden] { display: none; }
