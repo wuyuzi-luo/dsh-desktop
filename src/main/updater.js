@@ -312,6 +312,16 @@ async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
   return dshState; // 返回状态
 }
 
+// 强杀整个进程树：spawn 用 shell:true 时 child 引用是 cmd 壳，npm 是其子进程，
+// child.kill() 只杀壳会留下 npm 孤儿继续锁文件（自愈重试撞锁卡死在同一点的根因）。
+// Windows 用 taskkill /T /F 把整棵树端掉。
+function killTree(pid) {
+  if (!pid) return; // 无进程
+  try {
+    spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, shell: false }); // 杀进程树
+  } catch { /* 忽略 */ }
+}
+
 // 清理残留的 npm install 进程：上次更新卡死/中断留下的 npm 进程会锁住 node_modules 文件，
 // 导致新一轮安装 placeDep 阶段卡死（用户实测踩坑）。只杀命令行含 npm-cli 的 node 进程，
 // dsh 服务（lib/bin.js web）与 Claude Code 等不受影响。
@@ -362,11 +372,11 @@ export async function updateDsh({ registry } = {}) {
         try { new Notification({ title: 'dsh 更新可能卡住了', body: '已超过 1 分钟没有安装进展，请检查网络连接' }).show(); } catch { /* 忽略 */ }
       }
     }
-    if (idle >= 300 && !autoRetried && currentChild) { // 卡死 5 分钟且未重试过：自动杀进程并重试（自愈，无需人工介入）
+    if (idle >= 150 && !autoRetried && currentChild) { // 卡死 2 分半且未重试过：自动杀进程并重试（自愈，无需人工介入）
       autoRetried = true; // 置标志
       lastOutput = Date.now(); // 重置卡住基准
       showDialog({ phase: 'updating', percent, hint: '安装疑似卡住，正在自动重启安装（第 2 次尝试）…' }); // 告知自愈动作
-      try { currentChild.kill(); } catch { /* 已死忽略 */ } // 杀掉卡死的 npm（exit 事件会触发重试）
+      killTree(currentChild.pid); // 杀整个进程树（只杀壳会留下 npm 孤儿锁文件，见 killTree 注释）
     }
   }, 10000); // 每 10 秒检查一次
   try {
@@ -415,7 +425,7 @@ export async function updateDsh({ registry } = {}) {
       currentChild.stderr.on('data', feed); // 监听错误输出（npm 进度信息多在 stderr）
       // 等安装结束（10 分钟看门狗；被卡住检测 kill 时 exit code 为 null）
       code = await new Promise((resolve) => {
-        const timer = setTimeout(() => { try { currentChild.kill(); } catch { /* 已死忽略 */ } resolve(null); }, 10 * 60_000); // 超时强杀
+        const timer = setTimeout(() => { killTree(currentChild.pid); resolve(null); }, 10 * 60_000); // 超时杀进程树
         currentChild.on('exit', (c) => { clearTimeout(timer); resolve(c); }); // 正常/被 kill 退出
       });
       if (code === 0) break; // 成功：跳出尝试循环
