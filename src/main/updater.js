@@ -312,8 +312,24 @@ async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
   return dshState; // 返回状态
 }
 
+// 清理残留的 npm install 进程：上次更新卡死/中断留下的 npm 进程会锁住 node_modules 文件，
+// 导致新一轮安装 placeDep 阶段卡死（用户实测踩坑）。只杀命令行含 npm-cli 的 node 进程，
+// dsh 服务（lib/bin.js web）与 Claude Code 等不受影响。
+function killStaleNpmInstalls() {
+  return new Promise((resolve) => {
+    const ps = spawn('powershell', ['-NoProfile', '-Command', // PowerShell 精准过滤
+      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*npm-cli*install*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
+      shell: false, // 直接调 powershell
+      windowsHide: true // 不弹黑窗
+    });
+    ps.on('exit', () => resolve()); // 执行完即返回（无残留时静默成功）
+    setTimeout(() => { try { ps.kill(); } catch { /* 忽略 */ } resolve(); }, 10000); // 10 秒兜底
+  });
+}
+
 // 用户确认后更新 dsh：npm install 到安装目录 → 重启服务生效
 // registry：'mirror'=国内镜像 / 'official'=官方源（弹窗内用户自选，--registry 参数直接生效）
+// 自愈机制：安装前清残留 npm 进程；卡死 5 分钟自动杀进程重试一次（普通用户点一下就完事，不需人工介入）
 export async function updateDsh({ registry } = {}) {
   const latest = dshState.latest; // 目标版本
   if (dshState.status !== 'available' || !latest) return dshState; // 状态不符
@@ -321,6 +337,7 @@ export async function updateDsh({ registry } = {}) {
   updatingDsh = true; // 置标志
   setDsh('updating', { current: dshState.current, latest }); // 更新中
   await stopServiceFn?.(); // 更新前先停服务：避免 npm 替换运行中文件导致服务崩溃（装完会自动重启）
+  await killStaleNpmInstalls(); // 清理上次残留的 npm install 进程（防文件锁导致 placeDep 卡死）
   // 进度驱动：只由真实 npm 输出推进（心跳假进度已移除——曾让用户误以为 88% 快完成实际卡死）
   // 无输出时进度条保持不动 + 卡住警示持续显示，真实反映安装状态
   let percent = 5; // 起始进度（正在连接 npm 源）
@@ -329,11 +346,14 @@ export async function updateDsh({ registry } = {}) {
     showDialog({ phase: 'updating', percent, hint: '' }); // 推送进度（带空 hint：新输出=进展，清除卡住警示）
   };
   showDialog({ phase: 'updating', percent }); // 弹窗切到"正在更新"页（5%）
-  // 卡住检测：60 秒无任何 npm 输出 → 弹窗橙字提示原因 + 系统通知（只弹一次）；恢复后自动回默认文案
+  // 卡住检测：60 秒无输出 → 橙字警示 + 系统通知（一次）；5 分钟无输出 → 自动杀进程重试（自愈）
   let lastOutput = Date.now(); // 最后一次收到 npm 输出的时间戳
   let stuckNotified = false; // 本次卡住是否已发过系统通知（防重复骚扰）
+  let autoRetried = false; // 是否已自动重试过（只重试一次）
+  let currentChild = null; // 当前 npm 子进程（卡住自动处置用）
+  let installFinished = false; // 安装是否已结束（成功或最终失败）
   const stuckTimer = setInterval(() => {
-    if (dshState.status !== 'updating') return; // 更新已结束
+    if (installFinished) return; // 已结束
     const idle = Math.round((Date.now() - lastOutput) / 1000); // 已空闲秒数
     if (idle >= 60) { // 判定卡住
       showDialog({ phase: 'updating', percent, hint: `已 ${idle} 秒没有安装进展：可能网络较慢或连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字（无心跳覆盖，稳定显示）
@@ -341,9 +361,12 @@ export async function updateDsh({ registry } = {}) {
         stuckNotified = true; // 置标志
         try { new Notification({ title: 'dsh 更新可能卡住了', body: '已超过 1 分钟没有安装进展，请检查网络连接' }).show(); } catch { /* 忽略 */ }
       }
-    } else if (stuckNotified && idle < 10) { // 已恢复输出
-      stuckNotified = false; // 复位
-      showDialog({ phase: 'updating', percent, hint: '' }); // 恢复正常文案
+    }
+    if (idle >= 300 && !autoRetried && currentChild) { // 卡死 5 分钟且未重试过：自动杀进程并重试（自愈，无需人工介入）
+      autoRetried = true; // 置标志
+      lastOutput = Date.now(); // 重置卡住基准
+      showDialog({ phase: 'updating', percent, hint: '安装疑似卡住，正在自动重启安装（第 2 次尝试）…' }); // 告知自愈动作
+      try { currentChild.kill(); } catch { /* 已死忽略 */ } // 杀掉卡死的 npm（exit 事件会触发重试）
     }
   }, 10000); // 每 10 秒检查一次
   try {
@@ -365,36 +388,44 @@ export async function updateDsh({ registry } = {}) {
     const registryUrl = registry === 'official' ? OFFICIAL_REGISTRY : MIRROR_REGISTRY; // 官方或镜像
     const npmEnv = { ...process.env }; // 复制环境
     delete npmEnv.NODE_TLS_REJECT_UNAUTHORIZED; // 剔除证书豁免变量（防 npm 打印误导性警告）
-    const child = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit', '--registry', registryUrl], {
-      cwd: dir, // 安装目录为工作目录
-      env: npmEnv, // 环境（无 TLS 豁免变量）
-      shell: true, // Windows npm.cmd 解析
-      windowsHide: true // 不弹黑窗
-    });
     let tail = ''; // npm 输出尾部缓冲（失败时显示真实原因）
-    const feed = (chunk) => { // 处理 npm 输出行：推动进度 + 识别接近完成的行
-      const text = chunk.toString('utf8'); // 转字符串
-      if (text.trim()) lastOutput = Date.now(); // 有输出即刷新卡住检测基准
-      tail = (tail + text).slice(-2000); // 只留尾部 2KB
-      for (const line of text.split(/\r?\n/)) { // 逐行
-        if (!line.trim()) continue; // 空行跳过
-        bump(2); // 每个输出行 +2%（下载/安装过程有输出即前进）
-        if (/added\s+\d+|changed\s+\d+|audited\s+\d+|removed\s+\d+/.test(line)) { // 接近完成的行
-          percent = Math.max(percent, 92); // 跳到 92%
-          showDialog({ phase: 'updating', percent }); // 推送
+    let code = null; // 安装退出码（0=成功）
+    // 最多两次尝试：第一次卡死自动重试（自愈），第二次仍失败才报错
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      currentChild = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit', '--registry', registryUrl], {
+        cwd: dir, // 安装目录为工作目录
+        env: npmEnv, // 环境（无 TLS 豁免变量）
+        shell: true, // Windows npm.cmd 解析
+        windowsHide: true // 不弹黑窗
+      });
+      const feed = (chunk) => { // 处理 npm 输出行：推动进度 + 识别接近完成的行
+        const text = chunk.toString('utf8'); // 转字符串
+        if (text.trim()) lastOutput = Date.now(); // 有输出即刷新卡住检测基准
+        tail = (tail + text).slice(-2000); // 只留尾部 2KB
+        for (const line of text.split(/\r?\n/)) { // 逐行
+          if (!line.trim()) continue; // 空行跳过
+          bump(2); // 每个输出行 +2%（下载/安装过程有输出即前进）
+          if (/added\s+\d+|changed\s+\d+|audited\s+\d+|removed\s+\d+/.test(line)) { // 接近完成的行
+            percent = Math.max(percent, 92); // 跳到 92%
+            showDialog({ phase: 'updating', percent }); // 推送
+          }
         }
-      }
-    };
-    child.stdout.on('data', feed); // 监听标准输出
-    child.stderr.on('data', feed); // 监听错误输出（npm 进度信息多在 stderr）
-    // 等安装结束（10 分钟看门狗）
-    const code = await new Promise((resolve) => {
-      const timer = setTimeout(() => { try { child.kill(); } catch { /* 已死忽略 */ } resolve(null); }, 10 * 60_000); // 超时强杀
-      child.on('exit', (c) => { clearTimeout(timer); resolve(c); }); // 正常退出
-    });
-    if (code !== 0) { // 失败
+      };
+      currentChild.stdout.on('data', feed); // 监听标准输出
+      currentChild.stderr.on('data', feed); // 监听错误输出（npm 进度信息多在 stderr）
+      // 等安装结束（10 分钟看门狗；被卡住检测 kill 时 exit code 为 null）
+      code = await new Promise((resolve) => {
+        const timer = setTimeout(() => { try { currentChild.kill(); } catch { /* 已死忽略 */ } resolve(null); }, 10 * 60_000); // 超时强杀
+        currentChild.on('exit', (c) => { clearTimeout(timer); resolve(c); }); // 正常/被 kill 退出
+      });
+      if (code === 0) break; // 成功：跳出尝试循环
+      if (attempt === 1) continue; // 第一次失败/卡死（exit 为 null）：自动重试（卡住检测会提前 kill 并提示）
+    }
+    currentChild = null; // 清引用
+    installFinished = true; // 标记结束
+    if (code !== 0) { // 两次尝试后仍失败
       setDsh('error', { message: tail.trim() || 'dsh 更新失败' }); // 记错误态（带真实原因）
-      showDialog({ phase: 'dsh-error', message: tail.trim() }); // 弹窗提示失败并展示 npm 输出原因
+      showDialog({ phase: 'dsh-error', message: tail.trim() }); // 弹窗提示失败并展示 npm 输出原因（下方附镜像建议）
       return dshState; // 返回
     }
     setDsh('up-to-date', { current: latest, latest }); // 更新完成
@@ -405,6 +436,7 @@ export async function updateDsh({ registry } = {}) {
       n.show(); // 弹出
     } catch { /* 通知失败忽略 */ }
   } finally {
+    installFinished = true; // 兜底标记结束
     clearInterval(stuckTimer); // 停止卡住检测（更新结束）
     updatingDsh = false; // 复位
   }
