@@ -11,7 +11,7 @@ export const IPC = {
   SERVICE_RETRY: 'service:retry',
   // boot 页 missing 态"选择 dsh 安装目录"按钮 → 弹目录选择器并写配置
   SETUP_PICK_DSH_DIR: 'setup:pick-dsh-dir',
-  // boot 页 missing 态"帮我安装"按钮 → 自动检测 Node 并 npm 安装 dsh
+  // boot 页 missing 态"帮我安装"按钮 → 自动检测 Node 并 pnpm 安装 dsh
   SETUP_AUTO_INSTALL: 'setup:auto-install',
   // boot 页"我已确认安装 Node.js"按钮 → 检测 Node 版本是否达标
   SETUP_CHECK_NODE: 'setup:check-node',

@@ -5,7 +5,7 @@
 const views = {
   confirm: document.getElementById('view-confirm'), // 确认页：发现新版本
   downloading: document.getElementById('view-downloading'), // 下载中：APP 安装包
-  updating: document.getElementById('view-updating'), // 更新中：dsh 本体 npm 安装
+  updating: document.getElementById('view-updating'), // 更新中：dsh 本体 pnpm 安装
   'app-done': document.getElementById('view-app-done'), // APP 更新完成：请重启
   'dsh-done': document.getElementById('view-dsh-done'), // dsh 更新完成
   deferred: document.getElementById('view-deferred'), // 暂不更新告知页
@@ -87,8 +87,9 @@ function markdownToHtml(md) {
     if (/^&gt;\s?/.test(line)) return `<div class="md-quote">${line.replace(/^&gt;\s?/, '')}</div>`; // 引用行（转义后 &gt;）
     return line; // 普通行原样
   }).join('\n');
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>'); // 行内加粗 **x**
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>'); // 行内代码 `x`
+  // 跨行非贪婪匹配：release notes 的加粗/代码可能跨行（旧实现 [^*]+ 不跨行 → 跨行加粗原样显示）
+  html = html.replace(/\*\*([\s\S]+?)\*\*/g, '<b>$1</b>'); // 加粗 **x**（跨行安全）
+  html = html.replace(/`([\s\S]+?)`/g, '<code>$1</code>'); // 行内代码 `x`（跨行安全）
   return html;
 }
 
@@ -120,7 +121,7 @@ function render(payload) {
     document.getElementById('dlBar').style.width = (payload.percent ?? 0) + '%'; // 进度条
     document.getElementById('dlPercent').textContent = (payload.percent ?? 0) + '%'; // 百分比
     setHint(document.getElementById('dlHint'), payload.hint); // 卡住警示或默认文案
-  } else if (phase === 'updating') { // dsh 更新进度（npm 安装逐步反馈）
+  } else if (phase === 'updating') { // dsh 更新进度（pnpm 安装逐步反馈）
     document.getElementById('upBar').style.width = (payload.percent ?? 5) + '%'; // 进度条
     document.getElementById('upPercent').textContent = (payload.percent ?? 5) + '%'; // 百分比
     setHint(document.getElementById('upHint'), payload.hint, '更新期间服务会短暂暂停，完成后自动重启（属正常现象）'); // 卡住警示或默认文案+暂停说明
@@ -135,7 +136,7 @@ function render(payload) {
   } else if (phase === 'dsh-error') { // dsh 更新失败
     document.getElementById('errorTitle').textContent = 'dsh 本体更新失败'; // 失败标题
     const detail = document.getElementById('errorDetail'); // 失败原因元素
-    if (payload.message) { // 有 npm 输出原因（如网络错误）
+    if (payload.message) { // 有 pnpm 输出原因（如网络错误）
       detail.hidden = false; // 显示
       detail.textContent = String(payload.message).slice(0, 500); // 截断展示
     } else { // 无详细原因
@@ -170,7 +171,7 @@ btnLaterRestart.addEventListener('click', () => { // 副按钮：APP 完成页"�
 btnUpdate.addEventListener('click', () => { // 主按钮：按当前视图动作
   if (currentPhase === 'confirm') { // 确认页 → 立即更新（带上所选更新源）
     const registry = document.querySelector('input[name="src"]:checked')?.value; // 所选源（dsh 时有效）
-    window.dshDesktop.updateDialogAction('update', { registry }); // 主进程执行下载/npm 更新
+    window.dshDesktop.updateDialogAction('update', { registry }); // 主进程执行下载/pnpm 更新
   } else if (currentPhase === 'app-done') { // APP 完成页 → 立即重启
     window.dshDesktop.updateDialogAction('restart'); // 打开安装包 + 退出应用
   } else { // 完成/告知/失败页 → 关闭

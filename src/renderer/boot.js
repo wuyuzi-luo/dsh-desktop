@@ -127,7 +127,7 @@ pickDirBtn.addEventListener('click', async () => {
   // 主进程 restart 会推送 starting/running 状态，本页自动更新
 });
 
-// 帮我安装按钮：主进程自动检测 Node → npm 安装 dsh → 校验 → 写配置 → 重启
+// 帮我安装按钮：主进程自动检测 Node → pnpm 安装 dsh → 校验 → 写配置 → 重启
 installBtn.addEventListener('click', async () => {
   setSetupEnabled(false); // 安装期间禁用全部选项
   subEl.textContent = '正在检测环境…'; // 立即反馈
@@ -139,9 +139,14 @@ installBtn.addEventListener('click', async () => {
     return;
   }
   if (result.error) { // 安装失败
-    subEl.textContent = (result.error === 'need-node') // 按错误码给文案
-      ? '未检测到可用的 Node.js（需要 22.19+ 或 24+）。请先安装 Node.js 后重试'
-      : (result.error === 'busy' ? '安装正在进行中，请稍候' : '安装失败，请检查网络后重试');
+    const messages = { // 错误码 → 具体文案（此前只有 need-node/busy 有区分，其余全落"检查网络"误导用户）
+      'need-node': '未检测到可用的 Node.js（需要 22.19+ 或 24+）。请先安装 Node.js 后重试', // 缺 Node
+      busy: '安装正在进行中，请稍候', // 防重入
+      'mkdir-failed': '无法创建安装目录，请改用"选择已安装目录"', // 目录权限问题
+      invalid: '安装完成但未找到 dsh 入口，请改用"选择已安装目录"', // 入口缺失
+      'install-failed': '安装失败，请检查网络后重试', // 网络/通用
+    };
+    subEl.textContent = messages[result.error] ?? '安装失败，请检查网络后重试'; // 未知错误码兜底
     if (result.error === 'need-node') nodeLink.hidden = false; // 缺 Node：显示官网下载链接
     if (result.log) appendLog(result.log); // 有尾部日志则展示
     setSetupEnabled(true); // 恢复按钮可再次尝试

@@ -16,11 +16,12 @@ const MARK_END = '# <<< dsh-desktop:mcp end <<<';
 // 用于 env 里的动态引用（如 process.env.GITHUB_TOKEN），读写两端都要认识
 const JsExpr = new yaml.Type('tag:yaml.org,2002:js', {
   kind: 'scalar', // 标量类型
-  resolve: (d) => typeof d === 'string' && d.startsWith('process.env.'), // 识别动态引用字符串
+  resolve: (d) => typeof d === 'string', // 读入端放宽：凡带 !!js 标签的标量都接受（用户手写任意 JS 表达式也要能读，
+  // 旧实现只认 process.env. 前缀 → 其他 !!js 表达式读取时报错/丢内容导致导入列表静默为空）
   construct: (d) => d, // 读入时原样保留表达式文本
   instanceOf: String, // 实例类型
   represent: (v) => v, // 写出时原样
-  predicate: (o) => typeof o === 'string' && o.startsWith('process.env.') // dump 时选择该类型
+  predicate: (o) => typeof o === 'string' && o.startsWith('process.env.') // 写出端只把 process.env.* 输出为 !!js（应用管理的 env 动态引用）
 });
 // 应用自己的 YAML 模式（默认模式 + !!js 类型）
 const YAML_SCHEMA = yaml.DEFAULT_SCHEMA.extend([JsExpr]);
@@ -47,7 +48,8 @@ function toPatchEntry(def) {
     if (def.env && Object.keys(def.env).length) { // 环境变量
       config.env = {}; // 构建 env 对象
       for (const [k, v] of Object.entries(def.env)) { // 逐项
-        config.env[k] = typeof v === 'string' && v.startsWith('process.env.') ? new String(v) : v; // 动态引用用 String 实例（predicate 按值匹配即可）
+        config.env[k] = v; // 直接赋值：process.env.* 会由 dump 端 predicate 自动输出为 !!js 表达式
+        // （旧代码用 new String(v)：typeof 变成 'object'，predicate 的 typeof 检查恒 false → !!js 标签不产出 → 动态引用失效）
       }
     }
   } else { // streamable-http 传输

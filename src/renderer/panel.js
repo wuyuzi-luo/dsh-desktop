@@ -24,7 +24,8 @@ const els = {
   skillModeImport: document.getElementById('skillModeImport'), // 自动搜索导入模式
   skillManualFields: document.getElementById('skillManualFields'), // 手动安装区
   skillImportFields: document.getElementById('skillImportFields'), // 搜索导入区
-  skillPick: document.getElementById('skillPick'), // 选择文件夹/zip
+  skillPick: document.getElementById('skillPick'), // 选择 zip 压缩包
+  skillPickDir: document.getElementById('skillPickDir'), // 选择技能文件夹
   skillImportList: document.getElementById('skillImportList'), // 可导入列表
   skillImportEmpty: document.getElementById('skillImportEmpty'), // 空提示
   skillImportFilter: document.getElementById('skillImportFilter'), // 筛选输入框
@@ -50,7 +51,7 @@ function renderWorkspaces() {
   const list = snapshot?.workspaces ?? []; // 列表
   if (!list.length) { els.wsList.innerHTML = '<div class="empty">（无工作区）</div>'; return; } // 空态
   els.wsList.innerHTML = list.map((ws) => ` // 逐条渲染
-    <div class="row" data-wsid="${ws.id}">
+    <div class="row" data-wsid="${escapeHtml(ws.id)}">
       <div class="info">
         <div class="name">${escapeHtml(ws.title)}</div>
         <div class="desc">${escapeHtml(ws.path)} · ${ws.sessionCount} 个会话</div>
@@ -70,7 +71,7 @@ function renderSkills() {
   const list = snapshot?.skills ?? []; // 列表
   if (!list.length) { els.skillList.innerHTML = '<div class="empty">（无技能）</div>'; return; } // 空态
   els.skillList.innerHTML = list.map((s) => `
-    <div class="row" data-skillid="${s.id}" data-dir="${escapeHtml(s.dir)}">
+    <div class="row" data-skillid="${escapeHtml(s.id)}" data-dir="${escapeHtml(s.dir)}">
       <div class="info">
         <div class="name">${escapeHtml(s.name)}</div>
         <div class="desc">${escapeHtml(s.source)} · ${escapeHtml(s.description || '')}</div>
@@ -81,7 +82,7 @@ function renderSkills() {
       </label>
       <span class="open">▾</span>
     </div>
-    <div class="detail" data-for="${s.id}"></div>`).join('');
+    <div class="detail" data-for="${escapeHtml(s.id)}"></div>`).join(''); // data-* 值统一转义（技能 id 含目录路径，可能带引号等特殊字符）
   els.skillList.querySelectorAll('input[data-toggle="skill"]').forEach((input) => { // 开关事件
     input.addEventListener('change', async () => { // 切换
       const id = input.closest('.row').dataset.skillid; // 技能 id
@@ -96,7 +97,8 @@ function renderSkills() {
   els.skillList.querySelectorAll('.row').forEach((row) => { // 展开详情
     row.addEventListener('click', async (e) => { // 点击行（点开关除外）
       if (e.target.closest('.switch')) return; // 开关自身事件不冲突
-      const detail = els.skillList.querySelector(`.detail[data-for="${row.dataset.skillid}"]`); // 详情元素
+      // 用 dataset 遍历比较代替属性选择器插值（id 含引号/括号时选择器注入或失配）
+      const detail = [...els.skillList.querySelectorAll('.detail')].find((d) => d.dataset.for === row.dataset.skillid); // 详情元素
       const content = await window.dshDesktop.skillContent(row.dataset.skillid); // 拉正文
       detail.textContent = content ?? '（无内容）'; // 填充
       detail.classList.toggle('show'); // 展开/收起
@@ -138,7 +140,8 @@ function renderMcps() {
       }
       const name = row.dataset.mcpname; // 名称
       const m = (snapshot?.mcps ?? []).find((x) => x.serverName === name); // 找定义
-      const detail = els.mcpList.querySelector(`.detail[data-for="${name}"]`); // 详情元素
+      // 用 dataset 遍历比较代替属性选择器插值（名称含引号/括号时选择器注入或失配）
+      const detail = [...els.mcpList.querySelectorAll('.detail')].find((d) => d.dataset.for === name); // 详情元素
       detail.textContent = JSON.stringify(m, null, 2); // 显示完整配置（env 已脱敏）
       detail.classList.toggle('show'); // 展开/收起
     });
@@ -161,6 +164,11 @@ function escapeHtml(s) {
 async function refreshAll() {
   snapshot = await window.dshDesktop.getState(); // 拉快照
   els.ver.textContent = 'v' + (snapshot?.version ?? '-'); // 版本
+  const opacity = Number(snapshot?.skinOpacity); // 皮肤透明度实际值（此前滑块恒显 100%，不读真实配置）
+  if (Number.isFinite(opacity)) { // 有效值才同步
+    els.skinOpacitySlider.value = opacity; // 滑块位置
+    els.skinOpacityVal.textContent = opacity + '%'; // 数值显示
+  }
   renderService(); // 状态行
   renderWorkspaces(); // 工作区
   renderSkills(); // 技能
@@ -185,6 +193,9 @@ function renderUpdater() {
     // dsh 更新失败但已知有新版：面板持续显示失败状态（失败页关掉后用户也能看到下一步，不"失联"）
     els.btnUpdate.textContent = '⚠ 更新失败 点此重试'; // 失败提示
     els.btnUpdate.dataset.mode = 'check'; // 点击=重新检查+弹窗
+  } else if (u.status === 'downloaded') { // APP 已下载完成待重启（此前无分支：面板显示"检查更新"，用户找不到重启入口）
+    els.btnUpdate.textContent = '✅ 已下载完成，重启桌面端生效'; // 重启提示
+    els.btnUpdate.dataset.mode = 'none'; // 无需点击（重启动作在用户自己）
   } else if (u.status === 'downloading') { // APP 下载中
     els.btnUpdate.textContent = `⏳ 下载中 ${u.info?.percent ?? 0}%`; // 进度
     els.btnUpdate.dataset.mode = 'none'; // 点击无动作
@@ -266,6 +277,8 @@ els.btnRestart.addEventListener('click', async () => { // 重启服务
 els.btnUpdate.addEventListener('click', async () => { // "检查更新"按钮：APP 与 dsh 本体一起查
   const mode = els.btnUpdate.dataset.mode; // 当前按钮模式
   if (mode !== 'check') return; // 检查中/下载中/更新中不可重复点击
+  if (!snapshot) await refreshAll(); // 首次快照尚未返回：先补拉（否则后续用空快照渲染会静默/谎报"检查失败"）
+  els.btnUpdate.dataset.mode = 'none'; // 立即禁用：检查是异步的，不置 none 双击会触发两次检查（refreshAll 后按状态恢复）
   els.btnUpdate.textContent = '⏳ 检查中…'; // 反馈
   await window.dshDesktop.checkUpdate(); // 检查（主进程并行查完两者；有新版自动弹确认弹窗，与启动弹窗一致）
   await refreshAll(); // 用结果刷新按钮
@@ -354,15 +367,19 @@ async function renderSkillImportList() {
 els.skillImportFilter.addEventListener('input', renderSkillImportListFromCache); // 输入即筛选
 
 // 手动安装：调主进程弹选择（文件夹或 zip）
-els.skillPick.addEventListener('click', async () => { // 选择安装
-  const result = await window.dshDesktop.installSkill(); // 主进程弹框并安装
-  if (result && result.error) { // 安装失败（如 zip 内无 SKILL.md）
+// zip 与文件夹共用安装结果处理（选择模式不同，安装流程一致）
+async function pickAndInstallSkill(mode) { // mode: 'zip' | 'dir'
+  const result = await window.dshDesktop.installSkill({ mode }); // 主进程弹框并安装
+  if (!result) return; // 取消选择
+  if (result.error) { // 安装失败（如 zip 内无 SKILL.md）
     alert('安装失败：' + result.error); // 展示错误
     return;
   }
   els.skillModal.hidden = true; // 成功关闭弹层
   refreshAll(); // 刷新列表
-});
+}
+els.skillPick.addEventListener('click', () => pickAndInstallSkill('zip')); // 选择 zip 压缩包安装
+els.skillPickDir.addEventListener('click', () => pickAndInstallSkill('dir')); // 选择技能文件夹安装
 
 // MCP 添加弹层（手动添加 / 导入已有 两种模式）
 els.mcpAdd.addEventListener('click', () => { // 打开弹层（默认手动模式）
@@ -435,11 +452,14 @@ document.getElementById('mcpSave').addEventListener('click', async () => { // �
   refreshAll(); // 刷新
 });
 
-// 订阅主进程推送（服务状态变化时实时更新状态行）
+// 订阅主进程推送（服务状态变化实时更新状态行；更新状态推送实时刷新更新按钮——此前面板打开期间下载进度冻结）
 window.dshDesktop.onState((payload) => {
   if (payload && payload.type === 'service') { // 服务状态推送
     if (snapshot) snapshot.service = payload.state; // 更新缓存
     renderService(); // 重绘状态行
+  } else if (payload && payload.type === 'updater') { // 更新状态推送（下载进度/检查结果/失败态）
+    if (snapshot) snapshot.updater = { app: payload.app, dsh: payload.dsh }; // 更新缓存
+    renderUpdater(); // 重绘更新按钮
   }
 });
 

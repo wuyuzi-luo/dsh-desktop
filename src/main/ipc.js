@@ -2,7 +2,7 @@
 // 依赖由 index.js 注入（supervisor/notifier/updater），避免模块间循环引用
 
 import { ipcMain, app, dialog, shell } from 'electron'; // Electron 命名导入（shell 打开外部链接）
-import { spawn, exec } from 'node:child_process'; // spawn 跑 npm 安装；exec 检测 Node 版本
+import { spawn, exec } from 'node:child_process'; // spawn 跑 pnpm 安装；exec 检测 Node 版本
 import { promisify } from 'node:util'; // 把回调 API 转 Promise
 import { mkdirSync, existsSync } from 'node:fs'; // 建安装目录 / 判断盘符存在
 import { IPC } from '../shared/ipc-channels.js'; // 通道名常量
@@ -12,6 +12,7 @@ import { listSkills, toggleSkill, installSkill, readSkillContent, listImportable
 import { listMcps, addMcp, removeMcp, toggleMcp, listImportableMcps, adoptMcp } from './mcp-manager.js'; // MCP
 import { getConfig, setConfig, isValidDshDir, setDshDir } from './config.js'; // 配置读取/写入与 dsh 目录校验
 import { applySkin, clearSkin, isValidSkinImage } from './skin.js'; // 皮肤背景注入
+import { resolvePnpm, buildPnpmInstallArgs, killTree, ensurePnpmConfig } from './pnpm.js'; // pnpm 命令解析/安装参数/进程树强杀/构建脚本配置
 
 const execP = promisify(exec); // Promise 化 exec（Node 版本检测用）
 let installing = false; // 自动安装防重入标志（模块级）
@@ -46,6 +47,7 @@ export async function buildStateSnapshot(deps) {
     url: svc.url || `http://127.0.0.1:${getConfig('port')}`, // 服务地址
     version: app.getVersion(), // 应用版本
     updater: updater ? updater.getState() : { status: 'idle' }, // 更新状态
+    skinOpacity: getConfig('skinOpacity'), // 皮肤透明度（面板滑块初始化显示实际值）
     workspaces, // 工作区列表
     skills, // 技能列表
     mcps // MCP 列表
@@ -92,7 +94,7 @@ export function registerIpc(deps) {
   // 检测 Node.js（boot 页"我已确认安装 Node.js"按钮）
   ipcMain.handle(IPC.SETUP_CHECK_NODE, () => checkNodeVersion()); // 返回 { ok, version }
 
-  // 自动安装 dsh（boot 页 missing 态"帮我安装"）：Node 检测 → npm install → 校验 → 写配置 → 重启
+  // 自动安装 dsh（boot 页 missing 态"帮我安装"）：Node 检测 → pnpm install → 校验 → 写配置 → 重启
   ipcMain.handle(IPC.SETUP_AUTO_INSTALL, async (_e, opts) => {
     if (installing) return { error: 'busy' }; // 防重复点击
     installing = true; // 置防重入标志
@@ -188,12 +190,15 @@ export function registerIpc(deps) {
     await toggleSkill(id, enabled); // 移动目录
     return listSkills(); // 返回最新列表
   });
-  ipcMain.handle(IPC.SKILL_INSTALL, async () => { // 安装（文件夹或 zip 压缩包）
+  ipcMain.handle(IPC.SKILL_INSTALL, async (_e, opts) => { // 安装（zip 文件或技能文件夹）
     const win = getMainWindow(); // 父窗口
+    const isDir = opts?.mode === 'dir'; // 文件夹模式
     const result = await dialog.showOpenDialog(win, { // 选择对话框
-      title: '选择技能文件夹或 zip 压缩包', // 标题
-      properties: ['openFile', 'openDirectory'], // 文件与目录都可选
-      filters: [{ name: '技能包', extensions: ['zip'] }] // 文件过滤 zip
+      title: isDir ? '选择技能文件夹' : '选择技能 zip 压缩包', // 标题
+      // openFile 与 openDirectory 必须二选一：Windows 上两者组合 = 纯文件夹模式，文件被隐藏
+      //（用户实测"选择文件时检测不到 zip"的根因；拆成面板上两个按钮分别调用）
+      properties: isDir ? ['openDirectory'] : ['openFile'], // 文件夹 / 文件
+      ...(isDir ? {} : { filters: [{ name: '技能包', extensions: ['zip'] }] }) // 文件模式才加 zip 过滤
     });
     if (result.canceled || !result.filePaths.length) return null; // 取消
     try { // 安装（zip 内部解压）
@@ -255,7 +260,7 @@ export function registerIpc(deps) {
   // 更新弹窗按钮动作：update=立即更新 / later=暂不更新 / restart=立即重启 / done=关闭
   ipcMain.handle(IPC.UPDATE_DIALOG_ACTION, async (_e, action, extra) => {
     const updater = deps.getUpdater ? deps.getUpdater() : null; // 延迟取引用
-    if (action === 'update') { // 立即更新：按弹窗组件类型执行下载/npm 更新（extra.registry=dsh 更新源选择）
+    if (action === 'update') { // 立即更新：按弹窗组件类型执行下载/pnpm 更新（extra.registry=dsh 更新源选择）
       return updater ? updater.dialogUpdate(extra?.registry) : null; // 更新链路内部自动接续进度/完成弹窗
     }
     if (action === 'later') { // 暂不更新：弹窗切告知页
@@ -311,12 +316,13 @@ async function autoInstallDsh(deps, registry) {
   }
 
   push('start', `正在安装 dsh 到 ${target}，需要几分钟，请保持网络畅通…`); // 开始提示
+  await ensurePnpmConfig(target); // 确保 pnpm 构建脚本白名单存在（原生模块 node-pty/koffi 需要）
 
-  // 3. 安装前清理残留 npm 进程：上次安装失败/中断残留的 npm 会锁文件，导致重装卡死
-  //（与更新逻辑同一策略：只杀本项目的 dsh 安装进程，不误伤其他项目的 npm install）
+  // 3. 安装前清理残留安装进程：上次安装失败/中断残留的 npm/pnpm 会锁文件，导致重装卡死
+  //（与更新逻辑同一策略：只杀本项目的 dsh 安装进程，不误伤其他项目的安装任务）
   await new Promise((resolve) => {
     const ps = spawn('powershell', ['-NoProfile', '-Command', // PowerShell 精准过滤
-      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*npm-cli*install*' -and $_.CommandLine -like '*deepseek-ai/dsh*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
+      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*deepseek-ai/dsh*' -and ($_.CommandLine -like '*npm-cli*install*' -or $_.CommandLine -like '*pnpm*install*' -or $_.CommandLine -like '*npx*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
       shell: false, // 直接调 powershell
       windowsHide: true // 不弹黑窗
     });
@@ -324,12 +330,15 @@ async function autoInstallDsh(deps, registry) {
     setTimeout(() => { try { ps.kill(); } catch { /* 忽略 */ } resolve(); }, 30000); // 30 秒兜底（PowerShell 冷启动慢）
   });
 
-  // 4. npm install（shell:true 保证 Windows 下 npm.cmd 可解析；windowsHide 不弹黑窗）
+  // 4. pnpm install（shell:true 保证 Windows 下 pnpm.cmd 可解析；windowsHide 不弹黑窗）
+  // 为什么不用 npm：npm(arborist) 全量解析 dsh 依赖树必死循环/内存爆炸（实测），pnpm 90 秒装完
   // --registry 按用户所选源（boot 页自选；默认镜像：首次安装 200+ 包，镜像实测比官方源快 6 倍且稳定）
   const registryUrl = registry === 'official' ? 'https://registry.npmjs.org' : 'https://registry.npmmirror.com'; // 官方或镜像
   const npmEnv = { ...process.env }; // 复制环境
-  delete npmEnv.NODE_TLS_REJECT_UNAUTHORIZED; // 剔除证书豁免变量（防 npm 打印误导性警告）
-  const child = spawn('npm', ['install', '@deepseek-ai/dsh', '--no-fund', '--no-audit', '--registry', registryUrl], {
+  delete npmEnv.NODE_TLS_REJECT_UNAUTHORIZED; // 剔除证书豁免变量（防安装器打印误导性警告）
+  npmEnv.npm_config_registry = registryUrl; // npx 拉取 pnpm 本体时也走所选源（国内网络下 npx 走官方源会卡）
+  const pnpmPrefix = await resolvePnpm(); // pnpm 启动命令：['pnpm'] 或 ['npx','-y','pnpm@11']
+  const child = spawn(pnpmPrefix[0], [...pnpmPrefix.slice(1), ...buildPnpmInstallArgs('@deepseek-ai/dsh', registryUrl)], {
     cwd: target, // 安装到目标目录
     env: npmEnv, // 环境（无 TLS 豁免变量）
     shell: true, // Windows 批处理包装
@@ -346,21 +355,21 @@ async function autoInstallDsh(deps, registry) {
   child.stdout.on('data', feed); // 转发标准输出
   child.stderr.on('data', feed); // 转发错误输出
 
-  // 等安装结束（30 分钟看门狗防网络挂起；实测慢网络约 8 分钟）
-  // 超时杀整棵进程树：shell:true 下 child 是 cmd 壳，只杀壳会留下 npm 孤儿继续锁文件
+  // 等安装结束（30 分钟看门狗防网络挂起；pnpm 实测约 2 分钟）
+  // 超时杀整棵进程树：shell:true 下 child 是 cmd 壳，只杀壳会留下安装进程孤儿继续锁文件
   const code = await new Promise((resolve) => {
     const timer = setTimeout(() => { // 超时
-      spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, shell: false }); // 杀进程树
+      killTree(child.pid); // 杀进程树
       resolve(null); // 视为失败
     }, 30 * 60_000);
     child.on('exit', (c) => { clearTimeout(timer); resolve(c); }); // 正常退出
   });
   if (code !== 0) { // 安装失败（含看门狗超时）
     push('error', '安装失败，请检查网络后重试'); // 失败提示
-    return { error: 'npm-failed', log: tail.slice(-2000) }; // 带回尾部日志供 boot 页展示
+    return { error: 'install-failed', log: tail.slice(-2000) }; // 带回尾部日志供 boot 页展示
   }
 
-  // 4. 校验安装结果（npm 成功但入口缺失的极端情况兜底）
+  // 4. 校验安装结果（pnpm 成功但入口缺失的极端情况兜底）
   if (!isValidDshDir(target)) { // 目录里没有 dsh CLI 入口
     push('error', '安装完成但未找到 dsh 入口，请改用"选择已安装目录"'); // 提示改用手动选择
     return { error: 'invalid' }; // 返回错误

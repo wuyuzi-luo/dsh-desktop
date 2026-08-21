@@ -154,10 +154,11 @@
         <button class="abtn primary" id="skillModeManual">手动安装</button>
         <button class="abtn" id="skillModeImport">自动搜索导入</button>
       </div>
-      <!-- 手动安装：调主进程弹文件夹/zip 选择器 -->
+      <!-- 手动安装：zip 与文件夹分开两个入口（Windows 下文件/目录选择模式互斥，合并会看不到 zip） -->
       <div id="skillManualFields">
-        <p class="hint">选择本地的技能文件夹或 zip 压缩包，将复制到 dsh 技能目录。</p>
-        <button class="abtn primary" id="skillPick">选择文件夹 / zip</button>
+        <p class="hint">选择本地的技能 zip 压缩包或文件夹，将复制到 dsh 技能目录。</p>
+        <button class="abtn primary" id="skillPick">选择 zip 压缩包</button>
+        <button class="abtn" id="skillPickDir">选择技能文件夹</button>
       </div>
       <!-- 自动搜索导入：列出插件市场缓存中发现的技能 -->
       <div id="skillImportFields" hidden>

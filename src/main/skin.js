@@ -17,6 +17,8 @@ const MAX_SIDE_PX = 2560;
 const JPEG_QUALITY = 85;
 // 注入的 style 元素 id（清除时按 id 删除）
 const STYLE_ID = 'dsh-skin-style';
+// 皮肤应用序号（快速切换竞态防护：读图压缩是异步的，慢图后完成会覆盖快图）
+let skinSeq = 0;
 
 // 校验皮肤图片文件是否可用
 export function isValidSkinImage(path) {
@@ -64,13 +66,17 @@ body::before {
   opacity: ${opacity} !important;
   pointer-events: none !important;
 }
-/* 页面内容提到背景之上，并把 body 直接子容器（dsh 皮肤插件画背景的根层）背景透明化，
-   否则皮肤插件的背景会盖住桌面端壁纸（z-index:-1 时代"选图无报错但背景不变"的根因） */
+/* 页面内容提到壁纸层之上。dsh 皮肤插件把背景画在 body 自身（inline background-image），
+   位于 body::before 壁纸之下，无需处理；只需透明化 dsh 内容根 #root 的默认背景色露出壁纸 */
 body > *:not(#${STYLE_ID}):not(style) {
   position: relative !important;
   z-index: 1 !important;
+}
+body > #root {
   background: transparent !important;
-}`; // 背景独立层：位于 body 背景之上、页面内容之下，透明度只影响背景
+}`; // 注：旧实现给 body 全部直接子元素加 background:transparent !important，
+  // 会把遮罩层（如 .aionui-overlay）与弹窗背景一并强制透明，破坏 dsh 弹窗/遮罩
+  // 先删旧 style 再插入新的（幂等切换）
   // 先删旧 style 再插入新的（幂等切换）
   return `(() => {
   const old = document.getElementById('${STYLE_ID}');
@@ -87,11 +93,14 @@ export async function applySkin(win) {
   if (!win || win.isDestroyed()) return; // 窗口无效
   const imagePath = getConfig('skinImage'); // 当前皮肤路径
   if (!isValidSkinImage(imagePath)) { // 无皮肤或文件失效 → 清掉残留注入
+    skinSeq++; // 序号自增：使进行中的旧注入作废
     await clearSkin(win); // 确保干净
     return;
   }
+  const seq = ++skinSeq; // 领取本次应用序号
   try {
-    const dataUrl = await imageToDataUrl(imagePath); // 读图压缩转 base64
+    const dataUrl = await imageToDataUrl(imagePath); // 读图压缩转 base64（异步，期间可能又有新请求）
+    if (seq !== skinSeq) return; // 序号已过期：期间用户又切换了皮肤/清除，本次作废（旧图不覆盖新图）
     await win.webContents.executeJavaScript(buildSkinScript(dataUrl), true); // 注入 style 标签
   } catch (err) {
     throw new Error(`应用皮肤失败：${err?.message ?? err}`); // 把错误抛给 IPC（面板提示）
@@ -101,6 +110,7 @@ export async function applySkin(win) {
 // 清除当前窗口的皮肤注入（删除 style 标签，立即生效）
 export async function clearSkin(win) {
   if (!win || win.isDestroyed()) return; // 窗口无效
+  skinSeq++; // 序号自增：清除后仍在途的旧注入一律作废
   try {
     await win.webContents.executeJavaScript(`document.getElementById('${STYLE_ID}')?.remove();`, true); // 删除注入标签
   } catch { /* 页面未加载等异常忽略 */ }

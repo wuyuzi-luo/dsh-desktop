@@ -1,15 +1,15 @@
 // 更新模块（无依赖手动路线）：
 // APP：查 GitHub Releases 最新版 → 启动发现新版弹应用内更新弹窗（更新/暂不更新）→ 确认后下载 → 下载完成弹"请重启桌面端"
-// dsh 本体：读本机版本 + npm view 对比 → 启动发现新版同样弹窗 → 确认后 npm install 更新并重启服务
+// dsh 本体：读本机版本 + registry 最新版对比 → 启动发现新版同样弹窗 → 确认后 pnpm install 更新并重启服务
 // 弹窗与系统通知双保险；控制面板内两个按钮常显各自状态（含"已是最新"），无需先点检测
 // 放弃 electron-updater：其 6.8.9 与 Electron 43 ESM 主进程不兼容（内部 app 引用为空）
 
 import { app, shell, Notification } from 'electron'; // Electron 命名导入（已验证在真主进程可用）
 import { join } from 'node:path'; // 路径拼接
-import { writeFile, mkdir, readFile, rm } from 'node:fs/promises'; // 文件写出/读取/删除
-import { readdirSync, statSync } from 'node:fs'; // npm 日志定位/大小采样（卡死双判据用）
-import { spawn } from 'node:child_process'; // npm 更新 dsh 用
-import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler } from './window.js'; // 主窗口引用 + 更新弹窗
+import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 文件写出/读取
+import { spawn } from 'node:child_process'; // pnpm 更新 dsh 用
+import { resolvePnpm, buildPnpmInstallArgs, killTree, ensurePnpmConfig } from './pnpm.js'; // pnpm 命令解析/安装参数/进程树强杀/构建脚本配置
+import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler, pushPanelUpdate } from './window.js'; // 主窗口引用 + 更新弹窗 + 面板推送
 import { getConfig } from './config.js'; // 配置读取
 
 // 用户网络环境（MITM 代理/杀软证书劫持）下 undici fetch 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE，
@@ -45,6 +45,7 @@ function pushState() {
   if (win && !win.isDestroyed()) { // 面板是独立窗口，但推送沿用主窗口通道惯例
     win.webContents.send('updater:state', { app: updaterState, dsh: dshState }); // 推送
   }
+  pushPanelUpdate({ type: 'updater', app: updaterState, dsh: dshState }); // 同步推面板：面板打开期间下载进度/更新状态实时刷新
 }
 function setApp(status, info) { updaterState = { status, info: info ?? updaterState.info }; pushState(); } // APP 状态变更
 function setDsh(status, extra) { dshState = { ...dshState, status, ...(extra ?? {}) }; pushState(); } // dsh 状态变更
@@ -253,7 +254,7 @@ export async function downloadUpdate() {
   return updaterState; // 返回状态
 }
 
-// —— dsh 本体更新：读本机版本 + npm view 对比，确认后 npm install ——
+// —— dsh 本体更新：读本机版本 + registry 最新版对比，确认后 pnpm install ——
 // 读本机 dsh 版本（安装目录下官方包的 package.json）
 async function getLocalDshVersion() {
   try {
@@ -292,8 +293,8 @@ async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
   setDsh('checking', { current }); // 检查中
   if (!current) { setDsh('error', { message: '未检测到 dsh 安装' }); return dshState; } // 无本机版本
   try {
-    // 查 npm 最新版：改用 fetch 直连 registry（复用主进程 TLS 豁免，比子进程 npm view 更稳定，
-    // 之前"检查失败"频发多因 npm CLI 子进程受系统代理/证书影响）
+    // 查最新版：fetch 直连 registry（复用主进程 TLS 豁免，比子进程 CLI 查询更稳定，
+    // 之前"检查失败"频发多因 CLI 子进程受系统代理/证书影响）
     const res = await fetch('https://registry.npmjs.org/@deepseek-ai/dsh/latest', { // registry 简写端点
       headers: { 'User-Agent': 'dsh-desktop' }, // 礼貌标识
       signal: AbortSignal.timeout(15000) // 15s 超时
@@ -329,25 +330,15 @@ async function doCheckDshUpdate({ popup = true, notify = true } = {}) {
   return dshState; // 返回状态
 }
 
-// 强杀整个进程树：spawn 用 shell:true 时 child 引用是 cmd 壳，npm 是其子进程，
-// child.kill() 只杀壳会留下 npm 孤儿继续锁文件（自愈重试撞锁卡死在同一点的根因）。
-// Windows 用 taskkill /T /F 把整棵树端掉。
-function killTree(pid) {
-  if (!pid) return; // 无进程
-  try {
-    spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, shell: false }); // 杀进程树
-  } catch { /* 忽略 */ }
-}
-
-// 清理残留的 npm install 进程：上次更新卡死/中断留下的 npm 进程会锁住 node_modules 文件，
-// 导致新一轮安装 placeDep 阶段卡死（用户实测踩坑）。只杀命令行含 npm-cli 的 node 进程，
-// dsh 服务（lib/bin.js web）与 Claude Code 等不受影响。
+// 清理残留的安装进程:上次更新卡死/中断留下的 npm/pnpm 进程会锁住 node_modules 文件,
+// 导致新一轮安装卡死(用户实测踩坑)。只杀命令行含本项目的 dsh 包名的安装进程,
+// dsh 服务(lib/bin.js web)与 Claude Code 等其他 node 进程不受影响。
 function killStaleNpmInstalls() {
   return new Promise((resolve) => {
-    // 修复：匹配条件加 'deepseek-ai/dsh'——只杀本项目的 dsh 安装进程（命令行含 install @deepseek-ai/dsh），
-    // 旧条件 '*npm-cli*install*' 会误杀用户在其他项目/终端并行跑的 npm install
+    // 匹配条件:'deepseek-ai/dsh' 包名 + npm-cli/pnpm/npx 安装命令特征——只杀本项目安装进程
+    // (旧条件 '*npm-cli*install*' 会误杀用户在其他项目/终端并行跑的 npm install)
     const ps = spawn('powershell', ['-NoProfile', '-Command', // PowerShell 精准过滤
-      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*npm-cli*install*' -and $_.CommandLine -like '*deepseek-ai/dsh*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
+      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*deepseek-ai/dsh*' -and ($_.CommandLine -like '*npm-cli*install*' -or $_.CommandLine -like '*pnpm*install*' -or $_.CommandLine -like '*npx*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], {
       shell: false, // 直接调 powershell
       windowsHide: true // 不弹黑窗
     });
@@ -356,48 +347,37 @@ function killStaleNpmInstalls() {
   });
 }
 
-// 用户确认后更新 dsh：npm install 到安装目录 → 重启服务生效
+// 用户确认后更新 dsh：pnpm install 到安装目录 → 重启服务生效
 // registry：'mirror'=国内镜像 / 'official'=官方源（弹窗内用户自选，--registry 参数直接生效）
-// 自愈机制：安装前清残留 npm 进程；卡死 5 分钟自动杀进程重试一次（普通用户点一下就完事，不需人工介入）
+// 自愈机制：安装前清残留安装进程；卡死 2 分半自动杀进程重试一次（普通用户点一下就完事，不需人工介入）
+// 为什么是 pnpm：npm(arborist) 全量解析 dsh 的 185 子包依赖树必死循环/内存爆炸（实测 7 种姿势全卡），
+// pnpm 的 store 算法完全绕开且 90 秒装完；失败时保留旧依赖 + store 命中可秒级重装旧版恢复服务
 export async function updateDsh({ registry } = {}) {
   const latest = dshState.latest; // 目标版本
   if (dshState.status !== 'available' || !latest) return dshState; // 状态不符
   if (updatingDsh) return dshState; // 防重入
   updatingDsh = true; // 置标志
   setDsh('updating', { current: dshState.current, latest }); // 更新中
-  await stopServiceFn?.(); // 更新前先停服务：避免 npm 替换运行中文件导致服务崩溃（装完会自动重启）
   // 注：残留进程清理与旧包删除已移进重试循环（每次尝试前都重清——第一次卡死的根因若是文件锁，
   // 第二次必须重清，否则撞同一把锁自愈必然无效）
-  // 进度驱动：只由真实 npm 输出推进（心跳假进度已移除——曾让用户误以为 88% 快完成实际卡死）
+  // 进度驱动：只由真实 pnpm 输出推进（心跳假进度已移除——曾让用户误以为 88% 快完成实际卡死）
   // 无输出时进度条保持不动 + 卡住警示持续显示，真实反映安装状态
-  let percent = 5; // 起始进度（正在连接 npm 源）
+  let percent = 5; // 起始进度（正在连接安装源）
   const bump = (n) => { // 有真实输出才上涨进度并推送弹窗
     percent = Math.min(92, percent + n); // 封顶 92%（最后 8% 留给安装收尾）
     showDialog({ phase: 'updating', percent, hint: '' }); // 推送进度（带空 hint：新输出=进展，清除卡住警示）
   };
   showDialog({ phase: 'updating', percent }); // 弹窗切到"正在更新"页（5%）
-  // 卡住检测：60 秒无输出 → 橙字警示 + 系统通知（一次）；2 分半真卡死 → 自动杀进程重试（自愈）
-  // 双判据修复：npm 卡死时会往 stderr 刷 spinner 假输出，"无输出"判据被持续刷新永不触发；
-  // 增加"npm 调试日志文件 150 秒无增长"第二判据——日志只在真实安装进展时写入，spinner 骗不了它。
-  let lastOutput = Date.now(); // 最后一次收到 npm 输出的时间戳
+  // 卡住检测：60 秒无输出 → 橙字警示 + 系统通知（一次）；2 分半无输出 → 判定真卡死
+  // （npm 时代用"调试日志增长"双判据防 spinner 假输出骗过检测；pnpm 输出即真实进展，回归纯输出判据）
+  let lastOutput = Date.now(); // 最后一次收到 pnpm 输出的时间戳
   let stuckNotified = false; // 本次卡住是否已发过系统通知（防重复骚扰）
   let autoRetried = false; // 是否已自动重试过（只重试一次）
-  let currentChild = null; // 当前 npm 子进程（卡住自动处置用）
+  let currentChild = null; // 当前 pnpm 子进程（卡住自动处置用）
   let installFinished = false; // 安装是否已结束（成功或最终失败）
-  const logsDir = join(process.env.LOCALAPPDATA || '', 'npm-cache', '_logs'); // npm 调试日志目录（npmEnv 继承同环境变量）
-  let logFile = null; // 本次安装的 npm 日志文件路径
-  let logLastSize = -1; // 日志上次采样大小
-  let logLastChange = Date.now(); // 日志最后变化时间
   const stuckTimer = setInterval(() => {
     if (installFinished) return; // 已结束
     const idle = Math.round((Date.now() - lastOutput) / 1000); // 输出已空闲秒数
-    if (logFile) { // 采样日志大小（stat 失败则放弃该判据）
-      try {
-        const size = statSync(logFile).size; // 当前大小
-        if (size !== logLastSize) { logLastSize = size; logLastChange = Date.now(); } // 有增长 → 刷新基准
-      } catch { logFile = null; } // 日志被删/移动 → 退回单判据
-    }
-    const logFrozen = logFile ? Date.now() - logLastChange >= 150000 : false; // 日志 150 秒无增长
     if (idle >= 60) { // 轻度卡住（输出停）→ 警示
       showDialog({ phase: 'updating', percent, hint: `已 ${idle} 秒没有安装进展：可能网络较慢或连接中断，请检查网络连接。若长时间无进展，可关闭本窗口稍后重试` }); // 弹窗橙字（无心跳覆盖，稳定显示）
       if (!stuckNotified) { // 首次卡住 → 系统通知
@@ -405,17 +385,22 @@ export async function updateDsh({ registry } = {}) {
         try { new Notification({ title: 'dsh 更新可能卡住了', body: '已超过 1 分钟没有安装进展，请检查网络连接' }).show(); } catch { /* 忽略 */ }
       }
     }
-    const realStuck = logFile ? (idle >= 150 && logFrozen) : idle >= 150; // 真卡死：有日志时双判据，无日志退回输出判据
-    if (realStuck && !autoRetried && currentChild) { // 真卡死 2 分半且未重试过：自动杀进程并重试（自愈）
-      autoRetried = true; // 置标志
-      lastOutput = Date.now(); // 重置卡住基准
-      showDialog({ phase: 'updating', percent, hint: '安装疑似卡住，正在自动重启安装（第 2 次尝试）…' }); // 告知自愈动作
-      killTree(currentChild.pid); // 杀整个进程树（只杀壳会留下 npm 孤儿锁文件，见 killTree 注释）
+    if (idle >= 150 && currentChild) { // 2 分半无输出 = 真卡死
+      if (!autoRetried) { // 第一次卡死：自动杀进程并重试（自愈）
+        autoRetried = true; // 置标志
+        lastOutput = Date.now(); // 重置卡住基准
+        showDialog({ phase: 'updating', percent, hint: '安装疑似卡住，正在自动重启安装（第 2 次尝试）…' }); // 告知自愈动作
+        killTree(currentChild.pid); // 杀整个进程树（只杀壳会留下孤儿锁文件）
+      } else { // 第二次卡死：直接杀进程快速失败（不必干等 10 分钟看门狗；exit 为 null 走失败分支）
+        killTree(currentChild.pid); // 杀掉后等待 promise 以 null 决议，循环结束进失败路径
+      }
     }
   }, 10000); // 每 10 秒检查一次
   try {
+    await stopServiceFn?.(); // 更新前先停服务：避免 pnpm 替换运行中文件导致服务崩溃（装完会自动重启）
+    // （必须在 try 内：旧实现放 try 外，若 stop 抛异常 finally 不执行 → updatingDsh 恒 true → 更新永远无法再发起）
     const dir = getConfig('dshDir'); // 安装目录
-    // 安装前同步 overrides 到目标版本：overrides 是降级时锁旧版用的，若不同步 npm install 会与锁冲突直接失败
+    // 安装前同步 overrides 到目标版本：overrides 是降级时锁旧版用的，若不同步 pnpm install 会与锁冲突直接失败
     // （曾出现"点立即更新必失败"的问题：overrides 锁 rc.6 而安装目标 rc.7）
     try {
       const pkgPath = join(dir, 'package.json'); // 包清单路径
@@ -428,55 +413,42 @@ export async function updateDsh({ registry } = {}) {
         if (changed) await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n'); // 写回
       }
     } catch { /* overrides 同步失败不阻塞更新（没有 overrides 时走普通安装） */ }
+    await ensurePnpmConfig(dir); // 确保 pnpm 构建脚本白名单存在（原生模块 node-pty/koffi 需要）
     // 更新源：弹窗选择 → --registry 参数（优先级最高，不依赖 .npmrc 文件，选哪个走哪个）
     const registryUrl = registry === 'official' ? OFFICIAL_REGISTRY : MIRROR_REGISTRY; // 官方或镜像
     const npmEnv = { ...process.env }; // 复制环境
-    delete npmEnv.NODE_TLS_REJECT_UNAUTHORIZED; // 剔除证书豁免变量（防 npm 打印误导性警告）
-    let tail = ''; // npm 输出尾部缓冲（失败时显示真实原因）
+    delete npmEnv.NODE_TLS_REJECT_UNAUTHORIZED; // 剔除证书豁免变量（防安装器打印误导性警告）
+    npmEnv.npm_config_registry = registryUrl; // npx 拉取 pnpm 本体时也走所选源（国内网络下 npx 走官方源会卡）
+    const pnpmPrefix = await resolvePnpm(); // pnpm 启动命令：['pnpm'] 或 ['npx','-y','pnpm@11']
+    let tail = ''; // pnpm 输出尾部缓冲（失败时显示真实原因）
     let code = null; // 安装退出码（0=成功）
     // 最多两次尝试：第一次卡死自动重试（自愈），第二次仍失败才报错
     for (let attempt = 1; attempt <= 2; attempt++) {
-      // 每次尝试前重清：残留 npm 进程 + 旧包目录与锁文件
-      // （干净重装策略：增量 REPLACE 在 Windows 会卡死 placeDep，全量 ADD 稳定；
-      //  第二次尝试前必须重清——第一次卡死的根因若是文件锁，不重清必然撞同一把锁）
-      await killStaleNpmInstalls(); // 清残留进程
-      try {
-        await rm(join(dir, 'node_modules', '@deepseek-ai'), { recursive: true, force: true }); // 删旧 dsh 全家桶
-        await rm(join(dir, 'node_modules', '.package-lock.json'), { force: true }); // 删 npm 内部锁
-        await rm(join(dir, 'package-lock.json'), { force: true }); // 删根锁（全量重解析依赖树）
-      } catch { /* 删除失败不阻塞（无此文件时忽略） */ }
-      currentChild = spawn('npm', ['install', `@deepseek-ai/dsh@${latest}`, '--no-fund', '--no-audit', '--registry', registryUrl], {
+      await killStaleNpmInstalls(); // 每次尝试前清残留安装进程（卡死中断的进程会锁文件）
+      // 注：不再"干净重装"（删旧依赖+锁文件）——npm 时代全量重解析 dsh 依赖树必死循环（实测），
+      // 且删空旧依赖导致更新失败后旧版服务瘫痪（用户实测红图标）；pnpm 增量安装可靠，
+      // 保留旧依赖：失败时还能用 store 秒级重装旧版恢复服务
+      currentChild = spawn(pnpmPrefix[0], [...pnpmPrefix.slice(1), ...buildPnpmInstallArgs(`@deepseek-ai/dsh@${latest}`, registryUrl)], {
         cwd: dir, // 安装目录为工作目录
         env: npmEnv, // 环境（无 TLS 豁免变量）
-        shell: true, // Windows npm.cmd 解析
+        shell: true, // Windows 批处理解析（pnpm.cmd / npx.cmd）
         windowsHide: true // 不弹黑窗
       });
-      // 定位本次安装的 npm 调试日志（延迟 3 秒：npm 启动后才创建日志文件；文件名带启动时间戳，排序取最新）
-      setTimeout(() => {
-        try {
-          const files = readdirSync(logsDir).filter((f) => f.endsWith('.log')); // 全部日志文件
-          if (files.length) { // 有日志
-            logFile = join(logsDir, files.sort().pop()); // 最新一个
-            logLastSize = statSync(logFile).size; // 初始大小
-            logLastChange = Date.now(); // 初始基准
-          }
-        } catch { logFile = null; } // 目录异常 → 退回单判据
-      }, 3000);
-      const feed = (chunk) => { // 处理 npm 输出行：推动进度 + 识别接近完成的行
+      const feed = (chunk) => { // 处理 pnpm 输出行：推动进度 + 识别接近完成的行
         const text = chunk.toString('utf8'); // 转字符串
         if (text.trim()) lastOutput = Date.now(); // 有输出即刷新卡住检测基准
         tail = (tail + text).slice(-2000); // 只留尾部 2KB
         for (const line of text.split(/\r?\n/)) { // 逐行
           if (!line.trim()) continue; // 空行跳过
           bump(2); // 每个输出行 +2%（下载/安装过程有输出即前进）
-          if (/added\s+\d+|changed\s+\d+|audited\s+\d+|removed\s+\d+/.test(line)) { // 接近完成的行
+          if (/Progress: resolved|Done in|dependencies:|added\s+\d+|already up to date/i.test(line)) { // 接近完成的行（pnpm 输出格式）
             percent = Math.max(percent, 92); // 跳到 92%
             showDialog({ phase: 'updating', percent }); // 推送
           }
         }
       };
       currentChild.stdout.on('data', feed); // 监听标准输出
-      currentChild.stderr.on('data', feed); // 监听错误输出（npm 进度信息多在 stderr）
+      currentChild.stderr.on('data', feed); // 监听错误输出（pnpm 进度信息在 stderr）
       // 等安装结束（10 分钟看门狗；被卡住检测 kill 时 exit code 为 null）
       code = await new Promise((resolve) => {
         const timer = setTimeout(() => { killTree(currentChild.pid); resolve(null); }, 10 * 60_000); // 超时杀进程树
@@ -489,10 +461,35 @@ export async function updateDsh({ registry } = {}) {
     installFinished = true; // 标记结束
     if (code !== 0) { // 两次尝试后仍失败
       setDsh('error', { message: tail.trim() || 'dsh 更新失败' }); // 记错误态（带真实原因）
-      showDialog({ phase: 'dsh-error', message: tail.trim() }); // 弹窗提示失败并展示 npm 输出原因（下方附镜像建议）
-      // 修复：更新前停了服务、删了包，失败必须尝试拉回服务（入口缺失会进 missing 态引导重新安装，
-      // 不能停在 stopped——用户工作台会彻底停摆且无法自助恢复）
-      restartServiceFn?.(); // 尝试重启（成功=旧版服务复活；失败=missing 引导，都好过停摆）
+      if (updaterState.status === 'downloading' || updaterState.status === 'downloaded') { // APP 下载进行中
+        // 直推失败页会顶掉下载进度视图（下载还在继续，两边推送会反复横跳抢窗口）；
+        // 改为系统通知 + 面板常驻"更新失败"红字入口，不打扰 APP 下载
+        try { new Notification({ title: 'dsh 本体更新失败', body: '可在控制面板重试；不影响 APP 安装包下载' }).show(); } catch { /* 忽略 */ }
+      } else {
+        showDialog({ phase: 'dsh-error', message: tail.trim() }); // 弹窗提示失败并展示 pnpm 输出原因（下方附镜像建议）
+      }
+      // 失败恢复：更新过程中 pnpm 可能已部分重建依赖布局，直接重启服务必然瘫痪（用户实测红图标）。
+      // 用 pnpm 重装旧版本（store 命中，通常秒级）再重启——旧版依赖完整复活
+      const prev = dshState.current; // 更新前的版本号
+      (async () => {
+        try {
+          if (prev) { // 有旧版本才恢复
+            await killStaleNpmInstalls(); // 清残留进程
+            const prefix = await resolvePnpm(); // pnpm 命令（npx 兜底）
+            await new Promise((resolve) => { // 静默重装旧版（10 分钟看门狗）
+              const c = spawn(prefix[0], [...prefix.slice(1), ...buildPnpmInstallArgs(`@deepseek-ai/dsh@${prev}`, MIRROR_REGISTRY)], {
+                cwd: dir, // 安装目录
+                env: npmEnv, // 环境（无 TLS 豁免变量）
+                shell: true, // Windows 批处理解析
+                windowsHide: true // 不弹黑窗
+              });
+              const t = setTimeout(() => { killTree(c.pid); resolve(); }, 10 * 60_000); // 超时杀进程树
+              c.on('exit', () => { clearTimeout(t); resolve(); }); // 结束即返回
+            });
+          }
+        } catch { /* 恢复失败静默：重启兜底（入口缺失会进 missing 引导，好过停摆） */ }
+        restartServiceFn?.(); // 重启服务（恢复成功=旧版复活；失败=missing 引导）
+      })();
       return dshState; // 返回
     }
     setDsh('up-to-date', { current: latest, latest }); // 更新完成
@@ -514,7 +511,7 @@ export async function updateDsh({ registry } = {}) {
 // registry：dsh 更新时用户在弹窗里选的更新源（mirror/official）；不记忆，每次由客户决定
 export async function dialogUpdate(registry) {
   if (dialogType === 'app') return downloadUpdate(); // APP → 下载安装包（进度/完成弹窗自动接续）
-  if (dialogType === 'dsh') return updateDsh({ registry }); // dsh → npm 更新（按所选源）
+  if (dialogType === 'dsh') return updateDsh({ registry }); // dsh → pnpm 更新（按所选源）
   return updaterState; // 无类型（异常）→ 原样返回
 }
 

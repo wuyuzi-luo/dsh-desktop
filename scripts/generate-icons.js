@@ -3,7 +3,7 @@
 // 运行方式：npm run icons（node scripts/generate-icons.js）
 
 import sharp from 'sharp'; // SVG → PNG 渲染（内置 librsvg）
-import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 异步文件操作
+import { writeFile, mkdir, readFile, readdir } from 'node:fs/promises'; // 异步文件操作
 import { existsSync } from 'node:fs'; // 存在性检查
 import { join, dirname } from 'node:path'; // 路径
 import { fileURLToPath } from 'node:url'; // ESM 路径解析
@@ -15,12 +15,23 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DSH_DIR = process.env.DSH_DESKTOP_DSH_DIR || 'D:\\deepseek-harness';
 
 // 从 dsh 前端产物读取官方鲸鱼路径数据
+// 兼容两种依赖布局：npm 平铺（顶层 node_modules 可见传递依赖）与 pnpm（顶层只有直接依赖，
+// 传递依赖藏在 .pnpm/@deepseek-ai+dsh-web-frontend@版本/ 下——找不到时兜底自绘会"图标突变"，已踩坑）
 async function loadOfficialPath() {
-  const faviconPath = join(DSH_DIR, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist', 'favicon.svg'); // 官方前端 favicon
-  if (!existsSync(faviconPath)) return null; // 不存在 → null
-  const svg = await readFile(faviconPath, 'utf8'); // 读文件
-  const m = svg.match(/<path[^>]*\sd="([^"]+)"/); // 提取 path d 属性
-  return m ? m[1] : null; // 路径数据或 null
+  const nm = join(DSH_DIR, 'node_modules'); // 依赖根目录
+  const candidates = [join(nm, '@deepseek-ai', 'dsh-web-frontend', 'dist', 'favicon.svg')]; // npm 平铺布局候选
+  try {
+    const entries = await readdir(join(nm, '.pnpm')); // 列出 .pnpm（几百条目录，快）
+    const hit = entries.find((e) => e.startsWith('@deepseek-ai+dsh-web-frontend@')); // 找该包条目
+    if (hit) candidates.push(join(nm, '.pnpm', hit, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist', 'favicon.svg')); // pnpm 布局候选
+  } catch { /* 无 .pnpm 目录 → 只有 npm 候选 */ }
+  for (const faviconPath of candidates) { // 逐个候选试
+    if (!existsSync(faviconPath)) continue; // 不存在 → 下一个
+    const svg = await readFile(faviconPath, 'utf8'); // 读文件
+    const m = svg.match(/<path[^>]*\sd="([^"]+)"/); // 提取 path d 属性
+    if (m) return m[1]; // 拿到路径数据即返回
+  }
+  return null; // 都没有 → null（兜底自绘）
 }
 
 // 构建 512x512 图标 SVG（DeepSeek 蓝底圆角方 + 官方白鲸；无官方素材用自绘鲸鱼兜底）

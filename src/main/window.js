@@ -151,10 +151,14 @@ export function pushUpdateDialog(payload) {
   const win = getUpdateDialogWindow(); // 弹窗引用
   if (!win || win.isDestroyed()) return; // 窗口无效直接返回
   const push = () => { // 实际推送函数（复用）
-    if (!win.isDestroyed()) win.webContents.send(IPC.UPDATE_DIALOG_PUSH, payload); // 推内容
+    try { // 关闭瞬间竞态：closed 事件尚未清引用时窗口已在销毁中，send 会抛异常
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(IPC.UPDATE_DIALOG_PUSH, payload); // 推内容
+    } catch { /* 窗口销毁中 → 本次推送作废（后续推送由 createUpdateDialogWindow 重建窗口接续） */ }
   };
-  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', push); // 页面加载中 → 等加载完再推（防内容丢失）
-  else push(); // 已加载直接推
+  try {
+    if (win.webContents.isLoading()) win.webContents.once('did-finish-load', push); // 页面加载中 → 等加载完再推（防内容丢失）
+    else push(); // 已加载直接推
+  } catch { /* isLoading 在销毁中窗口也可能抛异常 → 同样作废 */ }
 }
 
 // 关闭更新弹窗
