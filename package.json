@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DeepSeek Harness 桌面",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "DeepSeek Harness 桌面客户端：托盘常驻、桌面通知、工作区快捷入口、Skill/MCP 管理",
   "type": "module",
   "main": "src/main/index.js",
