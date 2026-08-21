@@ -469,6 +469,17 @@ export async function dialogUpdate(registry) {
   return updaterState; // 无类型（异常）→ 原样返回
 }
 
+// 失败页"重试"按钮：用缓存的新版信息重弹确认弹窗（用户重新选源、重新更新）
+// 失败后状态是 error，需先恢复 available（updateDsh 校验 status 才肯执行）
+export async function dialogRetry() {
+  if (dialogType !== 'dsh') return updaterState; // 仅 dsh 支持重试（APP 下载失败直接重下即可）
+  if (dshState.latest && dshState.current) { // 有缓存的版本信息
+    setDsh('available'); // 恢复"有新版"状态（保留 latest/current/notes 字段）
+    showConfirmDialog('dsh', 'dsh 本体', dshState.current, dshState.latest, dshState.notes); // 重弹确认弹窗
+  }
+  return dshState; // 返回状态
+}
+
 // 弹窗"立即重启"按钮：打开已下载的安装包并退出应用（覆盖安装即升级，配置保留）
 export async function dialogRestart() {
   const path = updaterState.info?.path; // 已下载安装包路径
@@ -502,6 +513,7 @@ export function createUpdater(deps = {}) {
     ]),
     updateDsh, // 用户确认更新 dsh
     dialogUpdate, // 弹窗"立即更新"
+    dialogRetry, // 失败页"重试"
     dialogRestart, // 弹窗"立即重启"
     getState: () => ({ version: app.getVersion(), app: updaterState, dsh: dshState }) // 状态快照
   };

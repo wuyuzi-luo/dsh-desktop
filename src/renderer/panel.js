@@ -181,6 +181,10 @@ function renderUpdater() {
   } else if (appNew || dshNew) { // 任一组件有新版本
     els.btnUpdate.textContent = '⬇ 有新版本可用'; // 新版提示（点击重新检查并弹确认弹窗）
     els.btnUpdate.dataset.mode = 'check'; // 点击=检查+弹窗
+  } else if (d.status === 'error' && d.latest && d.current && d.latest !== d.current) {
+    // dsh 更新失败但已知有新版：面板持续显示失败状态（失败页关掉后用户也能看到下一步，不"失联"）
+    els.btnUpdate.textContent = '⚠ 更新失败 点此重试'; // 失败提示
+    els.btnUpdate.dataset.mode = 'check'; // 点击=重新检查+弹窗
   } else if (u.status === 'downloading') { // APP 下载中
     els.btnUpdate.textContent = `⏳ 下载中 ${u.info?.percent ?? 0}%`; // 进度
     els.btnUpdate.dataset.mode = 'none'; // 点击无动作

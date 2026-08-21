@@ -262,6 +262,9 @@ export function registerIpc(deps) {
       pushUpdateDialog({ phase: 'deferred' }); // 告知可在控制面板更新
       return true;
     }
+    if (action === 'retry') { // 失败页重试：用缓存信息重弹确认弹窗
+      return updater ? updater.dialogRetry() : null; // 主进程处理
+    }
     if (action === 'restart') { // 立即重启：打开安装包并退出应用
       return updater ? updater.dialogRestart() : null; // 主进程处理
     }
