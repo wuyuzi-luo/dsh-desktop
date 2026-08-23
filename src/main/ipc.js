@@ -216,7 +216,7 @@ export function registerIpc(deps) {
       return { error: String(err?.message ?? err) }; // 把错误带回面板展示
     }
   });
-  ipcMain.handle('skills:content', async (_e, id) => readSkillContent(id)); // 展开正文（临时通道）
+  ipcMain.handle(IPC.SKILL_CONTENT, async (_e, id) => readSkillContent(id)); // 展开正文（收编进常量）
   ipcMain.handle(IPC.SKILLS_IMPORT, () => listImportableSkills()); // 扫描可自动导入的技能
   ipcMain.handle(IPC.SKILLS_ADOPT, async (_e, external) => { // 导入搜索到的技能
     await adoptSkill(external); // 复制进扫描根

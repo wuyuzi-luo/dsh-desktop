@@ -82,7 +82,7 @@ if (!gotLock) {
     const win = createMainWindow(); // 创建（内部已加载 boot.html）
     // 页面每次加载完成后重新注入皮肤（工作台跳转/刷新后背景仍在）
     win.webContents.on('dom-ready', () => {
-      if (win.webContents.getURL().startsWith('http')) applySkin(win); // 仅对 dsh 工作台注入
+      if (win.webContents.getURL().startsWith('http')) applySkin(win).catch(() => {}); // 仅对 dsh 工作台注入；皮肤失败（图片损坏等）不产生未捕获异常
     });
     // 关窗 = 隐藏到托盘（显式退出才真关）；首次隐藏弹提示消除"以为退了"的困惑
     let hideHintShown = false; // 首次提示标记（会话内）
@@ -104,14 +104,17 @@ if (!gotLock) {
     notifier = createNotifier({ getMainWindow }); // 提前建通知器（IPC 注册需要引用）
     registerIpc({ supervisor, notifier, getUpdater: () => updater }); // 提前注册 IPC：boot/面板页加载快于服务启动，先注册防 "No handler registered"（updater 用 getter 延迟取）
     supervisor.onStatus(async (state) => { // 状态变化
-      pushBootState(win, { type: 'service', state, url: supervisor.getStatus().url }); // 推给 boot 页（带服务地址，boot 页可自行跳转）
+      const curWin = getMainWindow(); // 实时取当前主窗口（旧实现闭包引用创建时的 win，将来窗口重建会推错对象）
+      if (!curWin || curWin.isDestroyed()) return; // 无窗口跳过
+      pushBootState(curWin, { type: 'service', state, url: supervisor.getStatus().url }); // 推给 boot 页（带服务地址，boot 页可自行跳转）
       pushPanelUpdate({ type: 'service', state }); // 推给面板
-      refreshTray(); // 刷新托盘
-      if (state === 'running' && !win.webContents.getURL().startsWith('http')) { // 就绪且还没进 Web UI（getURL 为空也算：boot 页导航未完成时不误判）
+      refreshTray(); // 刷新托盘（tray.js 内部为原地更新图标+菜单，不重建）
+      if (state === 'running' && !curWin.webContents.getURL().startsWith('http')) { // 就绪且还没进 Web UI（getURL 为空也算：boot 页导航未完成时不误判）
         if (getConfig('guideSeenVersion') !== app.getVersion()) { // 首次运行或升级后首次：先看使用说明
-          loadGuide(win); // 加载引导页（点"进入工作台"后由 IPC 切到 Web UI）
+          loadGuide(curWin); // 加载引导页（点"进入工作台"后由 IPC 切到 Web UI）
         } else {
-          loadWebUi(win, `http://127.0.0.1:${getConfig('port')}`); // 已看过引导：直接切到 dsh Web UI
+          // 优先用 supervisor 解析出的真实就绪地址（端口被占用等场景与硬编码不一致）
+          loadWebUi(curWin, supervisor.getStatus().url || `http://127.0.0.1:${getConfig('port')}`); // 已看过引导：直接切到 dsh Web UI
         }
       }
       if (state === 'error') { // 启动失败（仅当有诊断输出才通知；运行中静默死亡由心跳回调通知，防双条重复）

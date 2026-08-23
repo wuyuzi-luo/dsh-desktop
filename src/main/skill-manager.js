@@ -61,7 +61,10 @@ function firstLine(text) {
 // 扫描一个目录下的技能清单
 async function scanDir(rootPath, label) {
   if (!existsSync(rootPath)) return []; // 目录不存在 → 空
-  const entries = await readdir(rootPath, { withFileTypes: true }); // 列出条目
+  let entries = []; // 目录条目
+  try {
+    entries = await readdir(rootPath, { withFileTypes: true }); // 列出条目
+  } catch { return []; } // 权限异常等降级为空（旧实现整个 listSkills 抛错，面板技能页全挂）
   const out = []; // 结果
   for (const e of entries) { // 逐条目
     if (!e.isDirectory()) continue; // 只认目录（每个技能一个文件夹）
@@ -131,7 +134,10 @@ export async function installSkill(sourcePath) {
   }
   const name = basename(srcDir); // 目标名取末级目录名
   const target = join(getSkillsDir(), name); // 安装落点
-  if (existsSync(target)) throw new Error(`技能 ${name} 已存在`); // 防覆盖
+  if (existsSync(target)) { // 防覆盖
+    if (tmpDir) await rm(tmpDir, { recursive: true, force: true }).catch(() => {}); // 早退前清理解压临时目录（旧实现此路径遗留 TEMP 垃圾）
+    throw new Error(`技能 ${name} 已存在`); // 报错
+  }
   await mkdir(getSkillsDir(), { recursive: true }); // 确保根目录
   await copyDir(srcDir, target); // 递归复制
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true }).catch(() => {}); // 清理临时目录
@@ -214,13 +220,12 @@ export async function toggleSkill(id, enabled) {
   const skill = all.find((s) => s.id === id); // 按 id 匹配
   if (!skill) throw new Error('技能不存在'); // 不存在报错
   if (skill.enabled === Boolean(enabled)) return; // 状态未变
-  if (enabled) { // 启用：从暂存目录移回 $DSH_HOME/skills
-    await mkdir(getSkillsDir(), { recursive: true }); // 确保根
-    await rename(skill.dir, join(getSkillsDir(), basename(skill.dir))); // 移动（同盘 rename 原子）
-  } else { // 停用：移入 skills-disabled
-    await mkdir(getDisabledSkillsDir(), { recursive: true }); // 确保暂存目录
-    await rename(skill.dir, join(getDisabledSkillsDir(), basename(skill.dir))); // 移动
+  const target = join(enabled ? getSkillsDir() : getDisabledSkillsDir(), basename(skill.dir)); // 目标路径
+  if (existsSync(target)) { // 重名冲突：旧实现直接 rename 抛系统错误，用户看不懂
+    throw new Error(`目标位置已存在同名目录（${target}），请先处理重名后再操作`); // 明确提示
   }
+  await mkdir(enabled ? getSkillsDir() : getDisabledSkillsDir(), { recursive: true }); // 确保目标根
+  await rename(skill.dir, target); // 移动（同盘 rename 原子）
 }
 
 // 删除技能：仅限应用自己管理目录内的技能（$DSH_HOME/skills 与停用暂存目录）

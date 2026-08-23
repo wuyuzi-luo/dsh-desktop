@@ -25,6 +25,7 @@ const IPC = {
   SKILL_TOGGLE: 'skills:toggle', // 技能开关
   SKILL_INSTALL: 'skills:install', // 安装技能
   SKILL_DELETE: 'skills:delete', // 删除技能
+  SKILL_CONTENT: 'skills:content', // 读取技能正文
   SKILLS_IMPORT: 'skills:import', // 扫描可导入技能
   SKILLS_ADOPT: 'skills:adopt', // 导入技能
   MCP_LIST: 'mcp:list', // MCP 列表
@@ -87,7 +88,7 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   deleteSkill: (id) => ipcRenderer.invoke(IPC.SKILL_DELETE, id), // 删除技能
   importSkillsList: () => ipcRenderer.invoke(IPC.SKILLS_IMPORT), // 可导入列表
   adoptSkill: (external) => ipcRenderer.invoke(IPC.SKILLS_ADOPT, external), // 导入
-  skillContent: (id) => ipcRenderer.invoke('skills:content', id), // 正文
+  skillContent: (id) => ipcRenderer.invoke(IPC.SKILL_CONTENT, id), // 正文（用常量：手写字符串改通道名时会漏改）
   // —— MCP ——
   listMcps: () => ipcRenderer.invoke(IPC.MCP_LIST), // 列表
   toggleMcp: (serverName, enabled) => ipcRenderer.invoke(IPC.MCP_TOGGLE, { serverName, enabled }), // 开关

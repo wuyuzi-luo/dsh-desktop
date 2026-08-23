@@ -36,6 +36,15 @@ function saveMcpDefs(defs) {
   setConfig('mcpServers', defs); // 持久化
 }
 
+// 操作串行链：add/remove/toggle/adopt 的"读定义→改→存→同步文件"不是原子操作，
+// 并发时（面板快速连点）两个操作读同一份定义分别写回，后者覆盖前者丢配置
+let mcpOps = Promise.resolve(); // 串行链尾（初始已完成）
+function withMcpLock(fn) { // 把操作挂到链上串行执行
+  const run = mcpOps.then(fn, fn); // 前一个 settle 后执行（前一个失败也继续链）
+  mcpOps = run.catch(() => {}); // 链上吞错防断链
+  return run; // 返回真实结果给调用方
+}
+
 // 把定义对象转换成 dsh 认识的 insert patch 条目（env 里 process.env.* 转成 !!js 表达式）
 function toPatchEntry(def) {
   const config = { // MCP 插件配置
@@ -121,28 +130,34 @@ async function readManagedBlockFromFile() {
 
 // 添加一个 MCP 定义
 async function addMcp(def) {
-  const defs = getAllMcpDefs(); // 读现有
-  if (defs.some((d) => d.serverName === def.serverName)) throw new Error(`MCP 名称 ${def.serverName} 已存在`); // 重名拒绝
-  defs.push({ ...def, enabled: true }); // 追加并默认启用
-  saveMcpDefs(defs); // 存配置
-  await syncToPatchFile(); // 同步到 patch（HMR 立即生效）
+  return withMcpLock(async () => { // 串行化：防并发读改写互相覆盖
+    const defs = getAllMcpDefs(); // 读现有
+    if (defs.some((d) => d.serverName === def.serverName)) throw new Error(`MCP 名称 ${def.serverName} 已存在`); // 重名拒绝
+    defs.push({ ...def, enabled: true }); // 追加并默认启用
+    saveMcpDefs(defs); // 存配置
+    await syncToPatchFile(); // 同步到 patch（HMR 立即生效）
+  });
 }
 
 // 删除一个 MCP 定义
 async function removeMcp(serverName) {
-  const defs = getAllMcpDefs().filter((d) => d.serverName !== serverName); // 过滤掉目标
-  saveMcpDefs(defs); // 存配置
-  await syncToPatchFile(); // 同步
+  return withMcpLock(async () => { // 串行化：防并发读改写互相覆盖
+    const defs = getAllMcpDefs().filter((d) => d.serverName !== serverName); // 过滤掉目标
+    saveMcpDefs(defs); // 存配置
+    await syncToPatchFile(); // 同步
+  });
 }
 
 // 切换启用/停用
 async function toggleMcp(serverName, enabled) {
-  const defs = getAllMcpDefs(); // 读现有
-  const def = defs.find((d) => d.serverName === serverName); // 找目标
-  if (!def) throw new Error(`MCP ${serverName} 不存在`); // 不存在报错
-  def.enabled = Boolean(enabled); // 改开关
-  saveMcpDefs(defs); // 存配置
-  await syncToPatchFile(); // 同步（停用=从 patch 摘除，HMR 生效）
+  return withMcpLock(async () => { // 串行化：防并发读改写互相覆盖
+    const defs = getAllMcpDefs(); // 读现有
+    const def = defs.find((d) => d.serverName === serverName); // 找目标
+    if (!def) throw new Error(`MCP ${serverName} 不存在`); // 不存在报错
+    def.enabled = Boolean(enabled); // 改开关
+    saveMcpDefs(defs); // 存配置
+    await syncToPatchFile(); // 同步（停用=从 patch 摘除，HMR 生效）
+  });
 }
 
 // 连接状态探测：http 传输试连 /initialize；stdio 只报配置存在（不实际拉起进程）
@@ -282,26 +297,28 @@ export async function listImportableMcps() {
 
 // 收编一个外部实例：加入应用 config、从文件摘除原条目（防 serverName 冲突）、再同步
 export async function adoptMcp(external) {
-  if (!external || !external.serverName) throw new Error('无效实例'); // 校验
-  const defs = getAllMcpDefs(); // 现有定义
-  if (defs.some((d) => d.serverName === external.serverName)) throw new Error(`MCP ${external.serverName} 已存在`); // 重名拒绝
-  // 关键：先从文件摘除原条目——dsh 规定存活实例中重复 serverName 会使后加载的插件实例失败，
-  // 若原条目保留，标记段里收编的副本会与原实例冲突导致整个 MCP 加载失败
-  await removeExternalEntryFromFile(external.serverName); // 摘除原文条目
-  const def = { // 转应用定义格式
-    serverName: external.serverName, // 命名空间
-    transport: external.transport, // 传输
-    command: external.command, // 命令
-    args: external.args, // 参数
-    url: external.url, // URL
-    env: external.env, // 环境
-    headers: external.headers, // 头
-    enabled: true, // 收编即启用
-    adopted: true // 标记来自导入
-  };
-  defs.push(def); // 加入
-  saveMcpDefs(defs); // 存配置
-  await syncToPatchFile(); // 同步（标记段接管开关管理）
+  return withMcpLock(async () => { // 串行化：防并发读改写互相覆盖
+    if (!external || !external.serverName) throw new Error('无效实例'); // 校验
+    const defs = getAllMcpDefs(); // 现有定义
+    if (defs.some((d) => d.serverName === external.serverName)) throw new Error(`MCP ${external.serverName} 已存在`); // 重名拒绝
+    // 关键：先从文件摘除原条目——dsh 规定存活实例中重复 serverName 会使后加载的插件实例失败，
+    // 若原条目保留，标记段里收编的副本会与原实例冲突导致整个 MCP 加载失败
+    await removeExternalEntryFromFile(external.serverName); // 摘除原文条目
+    const def = { // 转应用定义格式
+      serverName: external.serverName, // 命名空间
+      transport: external.transport, // 传输
+      command: external.command, // 命令
+      args: external.args, // 参数
+      url: external.url, // URL
+      env: external.env, // 环境
+      headers: external.headers, // 头
+      enabled: true, // 收编即启用
+      adopted: true // 标记来自导入
+    };
+    defs.push(def); // 加入
+    saveMcpDefs(defs); // 存配置
+    await syncToPatchFile(); // 同步（标记段接管开关管理）
+  });
 }
 
 // 从 cordis.patch.yml 文本级摘除含目标 serverName 的外部 MCP 顶层条目

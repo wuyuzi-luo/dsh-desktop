@@ -8,9 +8,11 @@ import { app, shell, Notification } from 'electron'; // Electron 命名导入（
 import { join } from 'node:path'; // 路径拼接
 import { writeFile, mkdir, readFile } from 'node:fs/promises'; // 文件写出/读取
 import { spawn } from 'node:child_process'; // pnpm 更新 dsh 用
+import { existsSync } from 'node:fs'; // 更新成功后校验 CLI 入口
 import { resolvePnpm, buildPnpmInstallArgs, killTree, ensurePnpmConfig } from './pnpm.js'; // pnpm 命令解析/安装参数/进程树强杀/构建脚本配置
+import { IPC } from '../shared/ipc-channels.js'; // 通道名常量（推送更新状态用，收编手写字符串）
 import { getMainWindow, createUpdateDialogWindow, pushUpdateDialog, closeUpdateDialog, setUpdateDialogClosedHandler, pushPanelUpdate } from './window.js'; // 主窗口引用 + 更新弹窗 + 面板推送
-import { getConfig } from './config.js'; // 配置读取
+import { getConfig, getDshCliEntry } from './config.js'; // 配置读取 + CLI 入口（成功校验）
 
 // 用户网络环境（MITM 代理/杀软证书劫持）下 undici fetch 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE，
 // 与打包工具链同策略关闭证书校验（个人工具，仓库与安装包均有签名，风险可接受）
@@ -43,7 +45,7 @@ let downloadDialogDismissed = false; // 用户在下载期间主动关闭了弹�
 function pushState() {
   const win = getMainWindow(); // 主窗口
   if (win && !win.isDestroyed()) { // 面板是独立窗口，但推送沿用主窗口通道惯例
-    win.webContents.send('updater:state', { app: updaterState, dsh: dshState }); // 推送
+    win.webContents.send(IPC.UPDATER_STATE, { app: updaterState, dsh: dshState }); // 推送（用常量：手写字符串改通道名时会漏改）
   }
   pushPanelUpdate({ type: 'updater', app: updaterState, dsh: dshState }); // 同步推面板：面板打开期间下载进度/更新状态实时刷新
 }
@@ -408,7 +410,8 @@ export async function updateDsh({ registry } = {}) {
       if (pkg.overrides && typeof pkg.overrides === 'object') { // 存在 overrides
         let changed = false; // 是否有变更
         for (const k of Object.keys(pkg.overrides)) { // 逐个子包
-          if (pkg.overrides[k] !== latest) { pkg.overrides[k] = latest; changed = true; } // 同步到目标版本
+          // 只同步 dsh-* 键：旧实现无条件全改，会抹掉用户/官方对非 dsh 包的特殊版本锁定
+          if (k.startsWith('@deepseek-ai/dsh') && pkg.overrides[k] !== latest) { pkg.overrides[k] = latest; changed = true; } // 同步到目标版本
         }
         if (changed) await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n'); // 写回
       }
@@ -454,7 +457,10 @@ export async function updateDsh({ registry } = {}) {
         const timer = setTimeout(() => { killTree(currentChild.pid); resolve(null); }, 10 * 60_000); // 超时杀进程树
         currentChild.on('exit', (c) => { clearTimeout(timer); resolve(c); }); // 正常/被 kill 退出
       });
-      if (code === 0) break; // 成功：跳出尝试循环
+      if (code === 0) { // 安装进程成功
+        if (existsSync(getDshCliEntry())) break; // CLI 入口有效才算真成功（防"安装成功但入口缺失"的假成功）
+        code = null; // 入口缺失：按失败处理（下方失败分支会重装旧版恢复服务，避免更新完变红图标）
+      }
       if (attempt === 1) continue; // 第一次失败/卡死（exit 为 null）：自动重试（卡住检测会提前 kill 并提示）
     }
     currentChild = null; // 清引用

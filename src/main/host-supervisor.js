@@ -5,15 +5,35 @@ import { spawn, exec } from 'node:child_process'; // spawn 启动子进程；exe
 import { promisify } from 'node:util'; // 把回调 API 转 Promise
 import { EventEmitter } from 'node:events'; // 状态变化事件
 import { existsSync } from 'node:fs'; // 检查 CLI 入口是否存在（未装 dsh 时进 missing 态）
-import { getConfig, getDshCliEntry } from './config.js'; // 读配置与 CLI 入口路径
+import { readFile } from 'node:fs/promises'; // 读 dsh 包版本（--no-open 参数兼容判断）
+import { getConfig, getDshCliEntry, getDshHome } from './config.js'; // 读配置、CLI 入口与数据目录（env 优先）
+import { join } from 'node:path'; // 路径拼接（package.json 定位）
 
 const execP = promisify(exec); // netstat 探测用 Promise 形式
 // dsh 启动完成时 stdout 打印的规范就绪行前缀（anywhere-labs 同款约定）
 const READINESS_PREFIX = 'dsh web: ';
 // 就绪等待超时（毫秒），超过判定启动失败
 const READINESS_TIMEOUT_MS = 90_000;
-// 停止宽限期：先温和 kill，超时后强杀
+// 停止宽限期：taskkill 杀树后等待主进程退出的兜底时限
 const SHUTDOWN_GRACE_MS = 5_000;
+
+// 简易版本比较：a >= b 返回 true（处理 x.y.z 与 x.y.z-pre 形态；解析失败返回 true 不拦截）
+function versionGte(a, b) {
+  const parse = (v) => { // 解析版本串
+    const m = String(v).replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/); // 三段 + 预发布
+    if (!m) return null; // 不可解析
+    return { main: [+m[1], +m[2], +m[3]], pre: m[4] || '' }; // 数值段与预发布串
+  };
+  const A = parse(a); // 待测版本
+  const B = parse(b); // 基线版本
+  if (!A || !B) return true; // 解析失败不拦截（默认按新版本处理）
+  for (let i = 0; i < 3; i++) { // 主版本逐段比较
+    if (A.main[i] !== B.main[i]) return A.main[i] > B.main[i]; // 高下立判
+  }
+  if (!B.pre) return true; // 同主版本且基线是正式版 → 待测 >= 基线
+  if (!A.pre) return true; // 待测是正式版 → 高于任何预发布
+  return A.pre >= B.pre; // 预发布段字符串比较（rc.1/rc.10 形态下可靠）
+}
 
 // 创建服务托管器
 export function createHostSupervisor() {
@@ -47,7 +67,8 @@ export function createHostSupervisor() {
       const { stdout } = await execP(`netstat -ano`); // 全量端口表
       const line = stdout
         .split('\n') // 逐行
-        .find((l) => l.includes(`:${port}`) && l.includes('LISTENING')); // 命中该端口监听行
+        // 按空白分词后精确匹配地址列（旧实现字符串 includes(':3080') 会误命中 13080/30800 等端口）
+        .find((l) => l.includes('LISTENING') && l.trim().split(/\s+/).some((col) => col.endsWith(`:${port}`)));
       if (!line) return null; // 无监听者
       const pid = parseInt(line.trim().split(/\s+/).at(-1), 10); // 最后一列是 PID
       return Number.isInteger(pid) && pid > 0 ? pid : null; // 合法 PID 才返回
@@ -105,21 +126,36 @@ export function createHostSupervisor() {
       setState('missing'); // 进 missing 态：boot 页引导用户选择安装目录
       return 'missing'; // 报告缺失（不 spawn，避免无意义的启动失败）
     }
+    stderrTail = ''; // 新一轮启动：清掉上次失败残留的诊断尾部（否则错误页展示的是历史原因，误导诊断）
     setState('starting'); // 进入启动中
     const parser = createReadinessParser(); // 建就绪解析器
     const cliEntry = getDshCliEntry(); // CLI 入口绝对路径
     const cwd = getConfig('dshDir'); // 工作目录 = dsh 安装目录
-    const env = { ...process.env, DSH_HOME: getConfig('dshHome') }; // 注入数据目录环境变量
+    const env = { ...process.env, DSH_HOME: getDshHome() }; // 注入数据目录环境变量（统一 helper：env 优先，与 dsh 自身约定一致）
     // 剔除主进程为自身网络设置的证书豁免变量：它会被子进程继承，
     // dsh 启动时打印 "NODE_TLS_REJECT_UNAUTHORIZED...insecure" 警告，被错误页显示后误导用户以为是错误原因
     delete env.NODE_TLS_REJECT_UNAUTHORIZED; // 不传递给 dsh 服务
-    const spawned = spawn('node', [cliEntry, 'web', '--port', String(port), '--no-open'], {
-      cwd, // 工作目录
-      env, // 环境变量
-      stdio: ['ignore', 'pipe', 'pipe'], // 关 stdin，接管 stdout/stderr
-      windowsHide: true // 不弹黑窗
-    }); // 直接 node 起 bin.js（PID 即服务本体；--port 必须传：否则 dsh 起默认 3080，与探测/心跳端口不一致会被心跳误杀）
-    // --no-open：dsh 0.1.1-rc.1 起 web 命令默认自动打开浏览器，桌面端有自己的窗口，禁用（否则每次启动都弹浏览器标签页）
+    // --no-open 参数兼容：dsh 0.1.1-rc.1 起 web 命令默认自动打开浏览器，需禁用以防每次启动弹标签页；
+    // 更早的 dsh 不认识该参数会启动失败，按版本决定是否传
+    let noOpenArg = '--no-open'; // 默认传（当前生态已是 0.1.1+）
+    try {
+      const pkgPath = join(cwd, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'); // dsh 包清单
+      const ver = String(JSON.parse(await readFile(pkgPath, 'utf8')).version ?? ''); // 读版本号
+      if (ver && !versionGte(ver, '0.1.1-rc.1')) noOpenArg = ''; // 旧版不传该参数
+    } catch { /* 读不到版本（极端情况）→ 保留 --no-open */ }
+    let spawned; // 子进程句柄（try 内赋，失败走 error 态）
+    try {
+      spawned = spawn('node', [cliEntry, 'web', '--port', String(port), ...(noOpenArg ? [noOpenArg] : [])], {
+        cwd, // 工作目录
+        env, // 环境变量
+        stdio: ['ignore', 'pipe', 'pipe'], // 关 stdin，接管 stdout/stderr
+        windowsHide: true // 不弹黑窗
+      }); // 直接 node 起 bin.js（PID 即服务本体；--port 必须传：否则 dsh 起默认 3080，与探测/心跳端口不一致会被心跳误杀）
+    } catch (err) { // spawn 同步失败（node 不可用/被卸载等）：不捕获会抛穿 ensureRunning，状态永远卡在 starting
+      stderrTail = String(err?.message ?? err); // 记录失败原因
+      setState('error'); // 进错误态（boot 页展示原因 + 重试按钮）
+      return 'failed'; // 报告失败
+    }
     child = spawned; // 更新模块级引用（本任务实例）
     owned = true; // 标记为自己托管
 
@@ -159,14 +195,13 @@ export function createHostSupervisor() {
     if (!owned || !child) { setState('stopped'); return; } // 非自己托管：仅复位状态
     const proc = child; // 快照句柄
     child = null; // 先清引用
-    proc.kill(); // 温和停止（Windows 上发 kill 信号）
-    const exited = await new Promise((resolve) => { // 等退出
-      const timer = setTimeout(() => resolve(false), SHUTDOWN_GRACE_MS); // 5s 宽限
-      proc.once('exit', () => { clearTimeout(timer); resolve(true); }); // 正常退出
+    // Windows 下 child.kill() 是 TerminateProcess，只杀主进程不留孙进程（dsh 会 spawn 沙箱子进程占端口）；
+    // 直接 taskkill /T /F 端掉整棵树，5 秒宽限仅作退出确认的兜底（通常 <1 秒完成）
+    spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true, shell: false }); // 杀进程树
+    await new Promise((resolve) => { // 等主进程退出
+      const timer = setTimeout(() => resolve(), SHUTDOWN_GRACE_MS); // 兜底宽限
+      proc.once('exit', () => { clearTimeout(timer); resolve(); }); // 正常退出
     });
-    if (!exited) { // 超时未退 → 强杀
-      try { proc.kill('SIGKILL'); } catch { /* 已死则忽略 */ }
-    }
     owned = false; readyUrl = null; // 复位
     setState('stopped'); // 进停止态
   }
@@ -198,6 +233,7 @@ export function createHostSupervisor() {
         heartbeatFailures = 0; // 复位
         if (owned && child) { try { child.kill(); } catch { /* 已死忽略 */ } child = null; owned = false; } // 清理托管句柄
         stderrTail = ''; // 清空诊断尾部（运行中静默死亡没有新 stderr，清掉防 onStatus 误弹历史残留）
+        readyUrl = null; // 清失效地址（面板不得再展示旧 URL）
         setState('error'); // 状态转 error（面板红灯 + boot 错误页）
         onDead?.(); // 通知回调（index.js 弹"服务异常"通知）
       }

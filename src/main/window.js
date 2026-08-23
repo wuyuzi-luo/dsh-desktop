@@ -37,7 +37,7 @@ export function createMainWindow() {
       sandbox: true // 沙箱（安全）
     }
   });
-  mainWindow.once('ready-to-show', () => mainWindow.show()); // 就绪后显示
+  mainWindow.once('ready-to-show', () => { if (!mainWindow.isDestroyed()) mainWindow.show(); }); // 就绪后显示（加销毁守卫）
   // 加载本地启动页
   mainWindow.loadFile(join(RENDERER_DIR, 'boot.html')); // boot 过渡页
   return mainWindow; // 返回
@@ -90,7 +90,7 @@ export function createPanelWindow(getStateSnapshot, handle) {
       sandbox: true
     }
   });
-  panelWindow.once('ready-to-show', () => panelWindow.show()); // 就绪显示
+  panelWindow.once('ready-to-show', () => { if (!panelWindow.isDestroyed()) panelWindow.show(); }); // 就绪显示（加销毁守卫）
   panelWindow.loadFile(join(RENDERER_DIR, 'panel.html')); // 加载面板页
   panelWindow.on('closed', () => { panelWindow = null; }); // 关闭时清引用
   return panelWindow; // 返回
@@ -129,7 +129,7 @@ export function createUpdateDialogWindow() {
       sandbox: true
     }
   });
-  updateDialogWindow.once('ready-to-show', () => updateDialogWindow.show()); // 就绪显示
+  updateDialogWindow.once('ready-to-show', () => { if (!updateDialogWindow.isDestroyed()) updateDialogWindow.show(); }); // 就绪显示（加销毁守卫：闭包引用模块变量，窗口快速关闭重开时防 show 错对象）
   updateDialogWindow.loadFile(join(RENDERER_DIR, 'update-dialog.html')); // 加载弹窗页
   updateDialogWindow.on('closed', () => { updateDialogWindow = null; onUpdateDialogClosed?.(); }); // 关闭时清引用并通知（弹队列下一个）
   return updateDialogWindow; // 返回

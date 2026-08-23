@@ -40,6 +40,7 @@ export const IPC = {
   // 安装 Skill（选目录或压缩包）
   SKILL_INSTALL: 'skills:install',
   SKILL_DELETE: 'skills:delete', // 删除技能（仅自家安装目录）
+  SKILL_CONTENT: 'skills:content', // 读取技能正文（收编手写字符串：改通道名会漏改的隐患）
   // 扫描可自动导入的 Skill（Claude 插件市场缓存）
   SKILLS_IMPORT: 'skills:import',
   // 导入搜索到的 Skill（复制进 dsh 扫描根）

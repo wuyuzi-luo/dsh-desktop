@@ -119,7 +119,7 @@ pickDirBtn.addEventListener('click', async () => {
   if (!result) return; // 无返回（异常）维持现状
   if (result.canceled) return; // 用户取消选择
   if (result.error) { // 所选目录无效
-    subEl.textContent = result.error; // 副文案展示具体原因，可再次点击重选
+    alert('所选目录无效：' + result.error); // 弹窗展示原因（旧实现直接覆盖副文案，用户丢失引导上下文）
     return;
   }
   setupEl.hidden = true; // 成功：收起选项
