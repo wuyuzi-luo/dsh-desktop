@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   listSkills: () => ipcRenderer.invoke(IPC.SKILLS_LIST), // 列表
   toggleSkill: (id, enabled) => ipcRenderer.invoke(IPC.SKILL_TOGGLE, { id, enabled }), // 开关
   installSkill: (opts) => ipcRenderer.invoke(IPC.SKILL_INSTALL, opts), // 安装（opts.mode: 'zip' 文件 / 'dir' 文件夹）
+  deleteSkill: (id) => ipcRenderer.invoke(IPC.SKILL_DELETE, id), // 删除技能
   importSkillsList: () => ipcRenderer.invoke(IPC.SKILLS_IMPORT), // 可导入列表
   adoptSkill: (external) => ipcRenderer.invoke(IPC.SKILLS_ADOPT, external), // 导入
   skillContent: (id) => ipcRenderer.invoke('skills:content', id), // 正文

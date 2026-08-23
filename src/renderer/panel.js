@@ -81,8 +81,9 @@ function renderSkills() {
         <span class="slider"></span>
       </label>
       <span class="open">▾</span>
+      ${(s.source === 'dsh 用户技能' || s.source === '已停用') ? '<span class="del" title="删除技能">✕</span>' : ''}
     </div>
-    <div class="detail" data-for="${escapeHtml(s.id)}"></div>`).join(''); // data-* 值统一转义（技能 id 含目录路径，可能带引号等特殊字符）
+    <div class="detail" data-for="${escapeHtml(s.id)}"></div>`).join(''); // 仅自家安装/停用的技能可删（外部目录只读展示） // data-* 值统一转义（技能 id 含目录路径，可能带引号等特殊字符）
   els.skillList.querySelectorAll('input[data-toggle="skill"]').forEach((input) => { // 开关事件
     input.addEventListener('change', async () => { // 切换
       const id = input.closest('.row').dataset.skillid; // 技能 id
@@ -97,6 +98,12 @@ function renderSkills() {
   els.skillList.querySelectorAll('.row').forEach((row) => { // 展开详情
     row.addEventListener('click', async (e) => { // 点击行（点开关除外）
       if (e.target.closest('.switch')) return; // 开关自身事件不冲突
+      if (e.target.classList.contains('del')) { // 点 ✕ = 删除（主进程弹确认对话框）
+        const r = await window.dshDesktop.deleteSkill(row.dataset.skillid); // 删除
+        if (r && r.error) alert('删除失败：' + r.error); // 错误提示（如外部目录技能）
+        refreshAll(); // 刷新
+        return;
+      }
       // 用 dataset 遍历比较代替属性选择器插值（id 含引号/括号时选择器注入或失配）
       const detail = [...els.skillList.querySelectorAll('.detail')].find((d) => d.dataset.for === row.dataset.skillid); // 详情元素
       const content = await window.dshDesktop.skillContent(row.dataset.skillid); // 拉正文

@@ -222,3 +222,15 @@ export async function toggleSkill(id, enabled) {
     await rename(skill.dir, join(getDisabledSkillsDir(), basename(skill.dir))); // 移动
   }
 }
+
+// 删除技能：仅限应用自己管理目录内的技能（$DSH_HOME/skills 与停用暂存目录）
+// Claude Code 技能目录是只读展示、共享 agent 目录是外部资产，都不可删（防误删外部数据）
+export async function deleteSkill(id) {
+  const all = await listSkills(); // 找目标
+  const skill = all.find((s) => s.id === id); // 按 id 匹配
+  if (!skill) throw new Error('技能不存在'); // 不存在报错
+  if (skill.source !== 'dsh 用户技能' && skill.source !== '已停用') { // 来源校验
+    throw new Error('该技能来自外部目录，请到原目录处理'); // 只允许删自家安装的
+  }
+  await rm(skill.dir, { recursive: true, force: true }); // 删除整个技能目录（不可恢复）
+}

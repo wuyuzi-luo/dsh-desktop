@@ -8,7 +8,7 @@ import { mkdirSync, existsSync } from 'node:fs'; // 建安装目录 / 判断盘�
 import { IPC } from '../shared/ipc-channels.js'; // 通道名常量
 import { getMainWindow, pushBootState, loadGuide, loadWebUi, pushUpdateDialog, closeUpdateDialog } from './window.js'; // 主窗口操作与 boot 页状态推送 + 更新弹窗
 import { loadWorkspaces, openWorkspace } from './workspace.js'; // 工作区
-import { listSkills, toggleSkill, installSkill, readSkillContent, listImportableSkills, adoptSkill } from './skill-manager.js'; // 技能
+import { listSkills, toggleSkill, installSkill, readSkillContent, listImportableSkills, adoptSkill, deleteSkill } from './skill-manager.js'; // 技能
 import { listMcps, addMcp, removeMcp, toggleMcp, listImportableMcps, adoptMcp } from './mcp-manager.js'; // MCP
 import { getConfig, setConfig, isValidDshDir, setDshDir } from './config.js'; // 配置读取/写入与 dsh 目录校验
 import { applySkin, clearSkin, isValidSkinImage } from './skin.js'; // 皮肤背景注入
@@ -190,6 +190,25 @@ export function registerIpc(deps) {
     await toggleSkill(id, enabled); // 移动目录
     return listSkills(); // 返回最新列表
   });
+  ipcMain.handle(IPC.SKILL_DELETE, async (_e, id) => { // 删除技能（确认后执行，防误触）
+    const win = getMainWindow(); // 父窗口
+    const r = await dialog.showMessageBox(win, { // 确认对话框
+      type: 'warning', // 警示图标
+      title: '删除技能', // 标题
+      message: '确定删除这个技能吗？', // 主文案
+      detail: '技能目录将被永久删除，不可恢复', // 说明
+      buttons: ['删除', '取消'], // 按钮（删除在前便于 Enter 确认，但默认焦点给取消防手滑）
+      defaultId: 1, // 默认焦点：取消
+      cancelId: 1 // Esc = 取消
+    });
+    if (r.response !== 0) return { canceled: true }; // 用户取消
+    try {
+      await deleteSkill(id); // 删除（仅限自家安装目录，外部目录报错）
+      return listSkills(); // 返回最新列表
+    } catch (err) { // 删除失败（如外部目录技能）
+      return { error: String(err?.message ?? err) }; // 错误带回面板提示
+    }
+  });
   ipcMain.handle(IPC.SKILL_INSTALL, async (_e, opts) => { // 安装（zip 文件或技能文件夹）
     const win = getMainWindow(); // 父窗口
     const isDir = opts?.mode === 'dir'; // 文件夹模式
@@ -225,7 +244,18 @@ export function registerIpc(deps) {
     await addMcp(def); // 存配置 + 同步
     return listMcps(); // 返回最新列表
   });
-  ipcMain.handle(IPC.MCP_REMOVE, async (_e, serverName) => { // 删除
+  ipcMain.handle(IPC.MCP_REMOVE, async (_e, serverName) => { // 删除（确认后执行，防误触——此前点 ✕ 即删）
+    const win = getMainWindow(); // 父窗口
+    const r = await dialog.showMessageBox(win, { // 确认对话框
+      type: 'warning', // 警示图标
+      title: '删除 MCP', // 标题
+      message: `确定删除 MCP「${serverName}」吗？`, // 主文案
+      detail: '配置将从应用与 dsh 的 cordis.patch.yml 中移除', // 说明
+      buttons: ['删除', '取消'], // 按钮
+      defaultId: 1, // 默认焦点：取消
+      cancelId: 1 // Esc = 取消
+    });
+    if (r.response !== 0) return { canceled: true }; // 用户取消
     await removeMcp(serverName); // 移除 + 同步
     return listMcps(); // 返回最新列表
   });

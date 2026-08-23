@@ -95,6 +95,8 @@ body {
 .detail.show { display: block; }
 .open { color: #57606a; cursor: pointer; font-size: 11px; flex: none; }
 .open:hover { color: #e6edf3; }
+.del { color: #e5484d55; cursor: pointer; font-size: 11px; flex: none; margin-left: 8px; }
+.del:hover { color: #e5484d; }
 
 /* ---------- 按钮 ---------- */
 .abtn {
