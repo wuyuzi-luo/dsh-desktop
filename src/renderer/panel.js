@@ -98,9 +98,14 @@ function renderSkills() {
   els.skillList.querySelectorAll('.row').forEach((row) => { // 展开详情
     row.addEventListener('click', async (e) => { // 点击行（点开关除外）
       if (e.target.closest('.switch')) return; // 开关自身事件不冲突
-      if (e.target.classList.contains('del')) { // 点 ✕ = 删除（主进程弹确认对话框）
-        const r = await window.dshDesktop.deleteSkill(row.dataset.skillid); // 删除
-        if (r && r.error) alert('删除失败：' + r.error); // 错误提示（如外部目录技能）
+      if (e.target.classList.contains('del')) { // 点 ✕ = 删除（renderer 原生 confirm，主进程系统对话框在此应用环境下不可见）
+        if (!window.confirm('确定删除这个技能吗？\n删除后不可恢复')) return; // 取消则不动
+        try {
+          const r = await window.dshDesktop.deleteSkill(row.dataset.skillid); // 删除
+          if (r && r.error) alert('删除失败：' + r.error); // 错误提示（如外部目录技能）
+        } catch (err) { // invoke 异常（通道缺失等）也要给用户反馈，不能静默
+          alert('删除失败：' + (err?.message ?? err)); // 异常原因
+        }
         refreshAll(); // 刷新
         return;
       }
@@ -140,9 +145,14 @@ function renderMcps() {
   els.mcpList.querySelectorAll('.row').forEach((row) => { // 行点击
     row.addEventListener('click', async (e) => { // 展开详情或删除
       if (e.target.closest('.switch')) return; // 开关不冲突
-      if (e.target.classList.contains('open')) { // 点 ✕ = 删除（主进程弹确认对话框）
-        const r = await window.dshDesktop.removeMcp(row.dataset.mcpname); // 删除
-        if (r && r.error) alert('删除失败：' + r.error); // 错误提示
+      if (e.target.classList.contains('open')) { // 点 ✕ = 删除（renderer 原生 confirm，主进程系统对话框在此应用环境下不可见）
+        if (!window.confirm(`确定删除 MCP「${row.dataset.mcpname}」吗？`)) return; // 取消则不动
+        try {
+          const r = await window.dshDesktop.removeMcp(row.dataset.mcpname); // 删除
+          if (r && r.error) alert('删除失败：' + r.error); // 错误提示
+        } catch (err) { // invoke 异常（通道缺失等）也要给用户反馈，不能静默
+          alert('删除失败：' + (err?.message ?? err)); // 异常原因
+        }
         refreshAll(); // 刷新
         return;
       }

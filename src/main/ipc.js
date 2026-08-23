@@ -190,21 +190,11 @@ export function registerIpc(deps) {
     await toggleSkill(id, enabled); // 移动目录
     return listSkills(); // 返回最新列表
   });
-  ipcMain.handle(IPC.SKILL_DELETE, async (_e, id) => { // 删除技能（确认后执行，防误触）
-    try { // 全链 try：确认框异常时把错误带回面板 alert，而不是静默无响应
-      const r = await dialog.showMessageBox({ // 独立模态对话框（不挂父窗口：面板是独立窗口，挂主窗口会不可见/不置前）
-        type: 'warning', // 警示图标
-        title: '删除技能', // 标题
-        message: '确定删除这个技能吗？', // 主文案
-        detail: '技能目录将被永久删除，不可恢复', // 说明
-        buttons: ['删除', '取消'], // 按钮（删除在前便于 Enter 确认，但默认焦点给取消防手滑）
-        defaultId: 1, // 默认焦点：取消
-        cancelId: 1 // Esc = 取消
-      });
-      if (r.response !== 0) return { canceled: true }; // 用户取消
+  ipcMain.handle(IPC.SKILL_DELETE, async (_e, id) => { // 删除技能（确认由面板 confirm 完成）
+    try {
       await deleteSkill(id); // 删除（仅限自家安装目录，外部目录报错）
       return listSkills(); // 返回最新列表
-    } catch (err) { // 删除失败（如外部目录技能/确认框异常）
+    } catch (err) { // 删除失败（如外部目录技能）
       return { error: String(err?.message ?? err) }; // 错误带回面板提示
     }
   });
@@ -243,18 +233,8 @@ export function registerIpc(deps) {
     await addMcp(def); // 存配置 + 同步
     return listMcps(); // 返回最新列表
   });
-  ipcMain.handle(IPC.MCP_REMOVE, async (_e, serverName) => { // 删除（确认后执行，防误触——此前点 ✕ 即删）
-    try { // 全链 try：确认框异常时把错误带回面板 alert，而不是静默无响应
-      const r = await dialog.showMessageBox({ // 独立模态对话框（不挂父窗口：面板是独立窗口，挂主窗口会不可见/不置前）
-        type: 'warning', // 警示图标
-        title: '删除 MCP', // 标题
-        message: `确定删除 MCP「${serverName}」吗？`, // 主文案
-        detail: '配置将从应用与 dsh 的 cordis.patch.yml 中移除', // 说明
-        buttons: ['删除', '取消'], // 按钮
-        defaultId: 1, // 默认焦点：取消
-        cancelId: 1 // Esc = 取消
-      });
-      if (r.response !== 0) return { canceled: true }; // 用户取消
+  ipcMain.handle(IPC.MCP_REMOVE, async (_e, serverName) => { // 删除（确认由面板 confirm 完成）
+    try {
       await removeMcp(serverName); // 移除 + 同步
       return listMcps(); // 返回最新列表
     } catch (err) { // 删除失败

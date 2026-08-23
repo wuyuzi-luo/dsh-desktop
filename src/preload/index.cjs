@@ -24,6 +24,7 @@ const IPC = {
   SKILLS_LIST: 'skills:list', // 技能列表
   SKILL_TOGGLE: 'skills:toggle', // 技能开关
   SKILL_INSTALL: 'skills:install', // 安装技能
+  SKILL_DELETE: 'skills:delete', // 删除技能
   SKILLS_IMPORT: 'skills:import', // 扫描可导入技能
   SKILLS_ADOPT: 'skills:adopt', // 导入技能
   MCP_LIST: 'mcp:list', // MCP 列表
