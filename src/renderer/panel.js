@@ -140,8 +140,9 @@ function renderMcps() {
   els.mcpList.querySelectorAll('.row').forEach((row) => { // 行点击
     row.addEventListener('click', async (e) => { // 展开详情或删除
       if (e.target.closest('.switch')) return; // 开关不冲突
-      if (e.target.classList.contains('open')) { // 点 ✕ = 删除
-        await window.dshDesktop.removeMcp(row.dataset.mcpname); // 删除
+      if (e.target.classList.contains('open')) { // 点 ✕ = 删除（主进程弹确认对话框）
+        const r = await window.dshDesktop.removeMcp(row.dataset.mcpname); // 删除
+        if (r && r.error) alert('删除失败：' + r.error); // 错误提示
         refreshAll(); // 刷新
         return;
       }
